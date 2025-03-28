@@ -4,8 +4,7 @@ import AppTopbar from "./components/AppTopbar.vue";
 import AppFooter from "./components/AppFooter.vue";
 import StatsWidget from "./components/dashboard/StatsWidget.vue";
 import SalesTrendWidget from "./components/dashboard/SalesTrendWidget.vue";
-import RecentActivityWidget from "./components/dashboard/RecentActivityWidget.vue";
-import ProductOverviewWidget from "./components/dashboard/ProductOverviewWidget.vue";
+import TopProductsWidget from "./components/dashboard/TopProductsWidget.vue";
 
 // Shared state for selected store
 const selectedStore = ref('All');
@@ -61,16 +60,21 @@ const handleRevenueSourceChange = (newSource) => {
                 :selectedStore="selectedStore"
                 :dateRange="dateRange"
                 :selectedRevenueSource="selectedRevenueSource"
+                class="mb-4"
             />
-            <div class="layout-grid-row">
+            <div class="layout-grid-row mb-4">
                  <SalesTrendWidget 
                     :selectedStore="selectedStore"
                     :dateRange="dateRange"
                     :selectedRevenueSource="selectedRevenueSource"
                 />
-                <RecentActivityWidget />
+                <TopProductsWidget
+                    :selectedStore="selectedStore"
+                    :dateRange="dateRange"
+                    :selectedRevenueSource="selectedRevenueSource"
+                    :limit="10"
+                />
             </div>
-            <ProductOverviewWidget />
         </div>
         <AppFooter />
     </div>

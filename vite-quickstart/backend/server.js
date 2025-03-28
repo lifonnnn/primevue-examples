@@ -455,6 +455,144 @@ app.get('/api/sales-trend', async (req, res) => {
     }
 });
 
+// --- Get Top Selling Products ---
+app.get('/api/top-products', async (req, res) => {
+    const { store, startDate, endDate, source, limit = 10 } = req.query; // Default limit to 10
+    const revenueSource = source || 'All';
+    const productLimit = parseInt(limit, 10);
+
+    console.log(`GET /api/top-products received - Store: ${store}, Source: ${revenueSource}, Start: ${startDate}, End: ${endDate}, Limit: ${productLimit}`);
+
+    // --- Basic Date Validation ---
+    console.log(`Backend received raw dates - Start: ${startDate}, End: ${endDate}`); 
+    const areDatesValid = startDate && endDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate);
+    if (!areDatesValid) {
+        console.error(`Date validation failed for Start: ${startDate}, End: ${endDate}`); // Log validation failure
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD for both startDate and endDate.' });
+    }
+    console.log(`Date parameters are valid.`);
+    // --- End Date Validation ---
+
+    let client;
+    try {
+        client = await pool.connect();
+        console.log('DB client connected for top products');
+
+        // Map frontend selection to database identifiers
+        const onlineSiteId = store === 'Wagga' ? '641' : store === 'Preston' ? '1837' : null;
+        const inStoreId = store === 'Wagga' ? 'wagga' : store === 'Preston' ? 'preston' : null;
+
+        // --- Prepare parameters - REVISED ---
+        const params = [];
+        let paramIndex = 1;
+
+        // Add parameters ONLY used in the query, in the correct order
+        params.push(revenueSource); // $1: sourceParamIndex
+        const sourceParamIndex = paramIndex++;
+        params.push(productLimit); // $2: limitParamIndex
+        const limitParamIndex = paramIndex++;
+
+        // In-store specific params
+        const includeInStore = revenueSource === 'All' || revenueSource === 'In Store';
+        const filterInStoreByStoreId = includeInStore && store !== 'All' && inStoreId;
+        params.push(filterInStoreByStoreId ? inStoreId : null); // $3: inStoreIdParamIndex
+        const inStoreIdParamIndex = paramIndex++;
+        const adjustedStartDate = addDays(startDate, 1);
+        const adjustedEndDateExclusive = addDays(endDate, 2);
+        params.push(adjustedStartDate); // $4: inStoreStartDateParamIndex
+        const inStoreStartDateParamIndex = paramIndex++;
+        params.push(adjustedEndDateExclusive); // $5: inStoreEndDateParamIndex
+        const inStoreEndDateParamIndex = paramIndex++;
+
+        // Online specific params
+        const includeOnline = revenueSource === 'All' || revenueSource === 'Bite';
+        const filterOnlineBySiteId = includeOnline && store !== 'All' && onlineSiteId;
+        params.push(filterOnlineBySiteId ? onlineSiteId : null); // $6: onlineSiteIdParamIndex
+        const onlineSiteIdParamIndex = paramIndex++;
+        const startTimestamp = `${startDate} 00:00:00`;
+        const endTimestamp = `${endDate} 23:59:59`;
+        params.push(startTimestamp); // $7: onlineStartDateParamIndex
+        const onlineStartDateParamIndex = paramIndex++;
+        params.push(endTimestamp);   // $8: onlineEndDateParamIndex
+        const onlineEndDateParamIndex = paramIndex++;
+
+
+        // --- Construct the SQL Query - REVISED INDICES ---
+        const query = `
+            WITH online_products AS (
+                SELECT
+                    boi.name AS product_identifier, -- Use name for online
+                    'Online' AS source_type,
+                    SUM(boi.quantity) AS total_quantity,
+                    SUM(boi.line_price) AS total_revenue
+                FROM bite_order_items boi
+                JOIN bite_orders bo ON boi.order_id = bo.order_id
+                WHERE
+                    ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'Bite')
+                    AND ($${onlineSiteIdParamIndex}::varchar IS NULL OR bo.site_id = $${onlineSiteIdParamIndex}::varchar)
+                    AND bo.ready_at_time BETWEEN EXTRACT(EPOCH FROM $${onlineStartDateParamIndex}::timestamp) AND EXTRACT(EPOCH FROM $${onlineEndDateParamIndex}::timestamp)
+                GROUP BY boi.name
+            ),
+            instore_products AS (
+                SELECT
+                    ti.product_id::text AS product_identifier, -- Use product_id (as text) for in-store
+                    'In-Store' AS source_type,
+                    SUM(ti.quantity) AS total_quantity,
+                    SUM(ti.unit_price * ti.quantity) AS total_revenue -- Approximate revenue calculation
+                FROM transaction_items ti
+                JOIN transactions t ON ti.transaction_id = t.id
+                WHERE
+                    ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'In Store')
+                    AND ($${inStoreIdParamIndex}::varchar IS NULL OR t.store_id = $${inStoreIdParamIndex}::varchar)
+                    AND t.transaction_date >= $${inStoreStartDateParamIndex}::date
+                    AND t.transaction_date < $${inStoreEndDateParamIndex}::date
+                    -- Filter out items with zero or null quantity/price if needed
+                    AND ti.quantity > 0 AND ti.unit_price > 0
+                GROUP BY ti.product_id
+            ),
+            combined_products AS (
+                SELECT product_identifier, source_type, total_quantity, total_revenue FROM online_products
+                UNION ALL
+                SELECT product_identifier, source_type, total_quantity, total_revenue FROM instore_products
+            ),
+            aggregated_products AS (
+                 SELECT
+                     product_identifier,
+                     SUM(total_quantity) as final_quantity,
+                     SUM(total_revenue) as final_revenue
+                 FROM combined_products
+                 GROUP BY product_identifier
+             )
+            SELECT
+                ap.product_identifier,
+                ap.final_quantity,
+                ap.final_revenue::float -- Ensure float output
+            FROM aggregated_products ap
+            ORDER BY ap.final_revenue DESC NULLS LAST -- Order by revenue, highest first
+            LIMIT $${limitParamIndex}; -- Apply limit
+        `;
+
+        console.log('Executing Top Products Query:', query.substring(0, 500) + '...'); // Log truncated query
+        console.log('With params:', params);
+
+        const result = await client.query(query, params);
+        console.log(`Top Products Query returned ${result.rows.length} rows.`);
+
+        // We will need to map product_id to names here once you provide the mapping.
+        // For now, it returns product_identifier which is name for online, id for in-store.
+        res.status(200).json(result.rows);
+
+    } catch (err) {
+        console.error('Error fetching top products:', err.stack);
+        res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    } finally {
+        if (client) {
+            client.release();
+            console.log('DB client released after top products query');
+        }
+    }
+});
+
 // --- Server Start ---
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
