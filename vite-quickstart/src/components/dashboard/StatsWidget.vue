@@ -10,8 +10,9 @@ const props = defineProps({
     required: true,
     // Basic validation: Ensure it's an array of two potentially null dates
     validator: (value) => Array.isArray(value) && value.length === 2
-  }
-  // Removed startDate and endDate
+  },
+  // Add prop for selected revenue source
+  selectedRevenueSource: String
 });
 
 // Make stats reactive
@@ -56,8 +57,8 @@ const formatDateRangeSubtitle = (range) => {
     return `${start} - ${end}`;
 };
 
-// Function to fetch total revenue, now accepts store and dateRange
-const fetchTotalRevenue = async (store, range) => {
+// Function to fetch total revenue, now accepts store, dateRange, and source
+const fetchTotalRevenue = async (store, range, source) => {
     const revenueStat = stats.value.find(stat => stat.title === "Revenue");
     if (!revenueStat) return;
 
@@ -78,8 +79,8 @@ const fetchTotalRevenue = async (store, range) => {
     const endDateFormatted = format(range[1], 'yyyy-MM-dd');
 
     try {
-        // Construct URL with query parameters for store, startDate, and endDate
-        const apiUrl = `http://localhost:3001/api/total-revenue?store=${encodeURIComponent(store)}&startDate=${startDateFormatted}&endDate=${endDateFormatted}`;
+        // Construct URL with query parameters for store, startDate, endDate, and source
+        const apiUrl = `http://localhost:3001/api/total-revenue?store=${encodeURIComponent(store)}&startDate=${startDateFormatted}&endDate=${endDateFormatted}&source=${encodeURIComponent(source)}`;
         console.log('Fetching revenue from:', apiUrl); // Log the full URL
         const response = await fetch(apiUrl);
         if (!response.ok) {
@@ -90,7 +91,9 @@ const fetchTotalRevenue = async (store, range) => {
         revenueStat.value = formatCurrency(data.totalRevenue);
          // Update subtitle to show store and date range
         const storeSubtitle = store === 'All' ? `All stores` : store;
-        revenueStat.subtitle = `${storeSubtitle}, ${formatDateRangeSubtitle(range)}`;
+        // Add source to subtitle
+        const sourceSubtitle = source === 'All' ? 'All Sources' : source;
+        revenueStat.subtitle = `${storeSubtitle}, ${sourceSubtitle}, ${formatDateRangeSubtitle(range)}`;
 
         // Update other stats' subtitles if needed (assuming they use the same range)
          stats.value.forEach(stat => {
@@ -115,16 +118,16 @@ const fetchTotalRevenue = async (store, range) => {
 
 // Fetch data when the component is mounted
 onMounted(() => {
-    // Pass both store and the initial dateRange
-    fetchTotalRevenue(props.selectedStore, props.dateRange);
+    // Pass store, initial dateRange, and initial source
+    fetchTotalRevenue(props.selectedStore, props.dateRange, props.selectedRevenueSource);
 });
 
-// Watch for changes in selectedStore OR dateRange prop and re-fetch data
-watch(() => [props.selectedStore, props.dateRange], ([newStore, newRange]) => {
-    console.log('StatsWidget: Props changed, refetching revenue for:', newStore, newRange);
-     // Pass both store and the new dateRange
-    fetchTotalRevenue(newStore, newRange);
-}, { deep: true }); // Use deep watch if dateRange array might be mutated internally, though ref should trigger it
+// Watch for changes in selectedStore, dateRange, OR selectedRevenueSource prop and re-fetch data
+watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource], ([newStore, newRange, newSource]) => {
+    console.log('StatsWidget: Props changed, refetching revenue for:', newStore, newRange, newSource);
+     // Pass store, new dateRange, and new source
+    fetchTotalRevenue(newStore, newRange, newSource);
+}, { deep: true });
 
 </script>
 

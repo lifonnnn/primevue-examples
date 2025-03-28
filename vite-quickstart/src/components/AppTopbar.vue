@@ -12,11 +12,12 @@ const props = defineProps({
   dateRange: {
     type: Array,
     required: true
-  }
+  },
+  selectedRevenueSource: String
 });
 
 // Define emits to notify App.vue of changes
-const emit = defineEmits(['update:selectedStore', 'update:dateRange']);
+const emit = defineEmits(['update:selectedStore', 'update:dateRange', 'update:selectedRevenueSource']);
 
 // Use a local ref to manage the calendar's model, initialized from the prop
 const localDateRange = ref([...props.dateRange]);
@@ -35,6 +36,13 @@ const onStoreChange = (event) => {
   console.log("Topbar: Store selection changed to:", event.value);
   // Emit the update event so v-model works in App.vue
   emit('update:selectedStore', event.value);
+};
+
+// Handle revenue source change and emit event
+const onRevenueSourceChange = (event) => {
+  console.log("Topbar: Revenue source changed to:", event.value);
+  // Emit the update event so v-model works in App.vue
+  emit('update:selectedRevenueSource', event.value);
 };
 
 // Handle date range change and emit event
@@ -98,6 +106,16 @@ const onDateRangeChange = (newRange) => {
                         showIcon
                         class="w-full md:w-14rem p-inputtext-sm"
                         :manualInput="false"
+                    />
+                </div>
+                <div class="flex items-center mr-3 mb-2 md:mb-0">
+                    <span class="mr-2 text-sm">Revenue Source:</span>
+                    <Dropdown
+                        :modelValue="props.selectedRevenueSource"
+                        :options="[ 'All', 'In Store', 'Bite' ]"
+                        placeholder="Select Source"
+                        class="w-full md:w-12rem p-inputtext-sm"
+                        @change="onRevenueSourceChange"
                     />
                 </div>
                 <Button type="button" class="topbar-theme-button mr-2 mb-2 md:mb-0" @click="toggleDarkMode" text rounded>

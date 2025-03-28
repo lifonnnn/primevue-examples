@@ -18,6 +18,9 @@ const sevenDaysAgo = new Date();
 sevenDaysAgo.setDate(today.getDate() - 7);
 const dateRange = ref([sevenDaysAgo, today]); // Array [startDate, endDate]
 
+// Shared state for revenue source
+const selectedRevenueSource = ref('All'); // Default to 'All'
+
 // Handler for store change event from Topbar
 const handleStoreChange = (newStore) => {
   selectedStore.value = newStore;
@@ -30,6 +33,12 @@ const handleDateRangeChange = (newRange) => {
     console.log('App.vue: Date range changed to:', dateRange.value);
 }
 
+// Handler for revenue source change
+const handleRevenueSourceChange = (newSource) => {
+    selectedRevenueSource.value = newSource;
+    console.log('App.vue: Revenue source changed to:', selectedRevenueSource.value);
+}
+
 </script>
 
 <template>
@@ -38,13 +47,16 @@ const handleDateRangeChange = (newRange) => {
             :selectedStore="selectedStore"
             :stores="stores"
             :dateRange="dateRange"
+            :selectedRevenueSource="selectedRevenueSource"
             @update:selectedStore="handleStoreChange"
             @update:dateRange="handleDateRangeChange"
+            @update:selectedRevenueSource="handleRevenueSourceChange"
         />
         <div class="layout-grid">
             <StatsWidget 
                 :selectedStore="selectedStore"
                 :dateRange="dateRange"
+                :selectedRevenueSource="selectedRevenueSource"
             />
             <div class="layout-grid-row">
                 <SalesTrendWidget />

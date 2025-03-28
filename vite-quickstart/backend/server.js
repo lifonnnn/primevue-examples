@@ -46,9 +46,10 @@ app.get('/api/health', (req, res) => {
 
 // Get Total Revenue (Combined In-Store and Online)
 app.get('/api/total-revenue', async (req, res) => {
-  // Extract store, startDate, and endDate from query parameters
-  const { store, startDate, endDate } = req.query;
-  console.log(`GET /api/total-revenue received - Store: ${store}, Start: ${startDate}, End: ${endDate}`);
+  // Extract store, startDate, endDate, and source from query parameters
+  const { store, startDate, endDate, source } = req.query;
+  const revenueSource = source || 'All'; // Default to 'All' if not provided
+  console.log(`GET /api/total-revenue received - Store: ${store}, Source: ${revenueSource}, Start: ${startDate}, End: ${endDate}`);
 
   // --- Basic Date Validation ---
   const areDatesValid = startDate && endDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate);
@@ -65,89 +66,91 @@ app.get('/api/total-revenue', async (req, res) => {
     client = await pool.connect();
     console.log('DB client connected');
 
+    // Map frontend selection to database identifiers
     const onlineSiteId = store === 'Wagga' ? '641' : store === 'Preston' ? '1837' : null;
     const inStoreId = store === 'Wagga' ? 'wagga' : store === 'Preston' ? 'preston' : null;
 
-    // --- Query 1: In-Store Revenue ---
-    let inStoreQuery = `SELECT COALESCE(SUM(total_amount), 0) as revenue FROM transactions`;
-    const inStoreParams = [];
-    const inStoreConditions = [];
-    let inStoreParamIndex = 1;
+    // --- Conditionally Execute Queries based on revenueSource --- 
 
-    // Add date condition for in-store (using date and time columns)
-    if (areDatesValid) {
-      inStoreConditions.push(`transaction_date BETWEEN $${inStoreParamIndex++} AND $${inStoreParamIndex++}`);
-      inStoreParams.push(startDate, endDate);
-      // Add time conditions matching user query >= 00:00:00 and <= 23:59:59
-      inStoreConditions.push(`transaction_time >= '00:00:00'`);
-      inStoreConditions.push(`transaction_time <= '23:59:59'`); // Using <= for inclusivity of last second
+    // --- Query 1: In-Store Revenue (Run if source is 'All' or 'In Store') --- 
+    let inStoreRevenue = 0;
+    if (revenueSource === 'All' || revenueSource === 'In Store') { 
+        let inStoreQuery = `SELECT COALESCE(SUM(total_amount), 0) as revenue FROM transactions`;
+        const inStoreParams = [];
+        const inStoreConditions = [];
+        let inStoreParamIndex = 1;
+
+        // Add date condition for in-store
+        if (areDatesValid) {
+            inStoreConditions.push(`transaction_date BETWEEN $${inStoreParamIndex++} AND $${inStoreParamIndex++}`);
+            inStoreParams.push(startDate, endDate);
+            inStoreConditions.push(`transaction_time >= '00:00:00'`);
+            inStoreConditions.push(`transaction_time <= '23:59:59'`);
+        }
+
+        // Add store condition for in-store
+        if (inStoreId) {
+            inStoreConditions.push(`store_id = $${inStoreParamIndex++}`);
+            inStoreParams.push(inStoreId);
+        } else if (store !== 'All') {
+            console.log("No specific inStoreId matched, not filtering in-store query by store_id.");
+        }
+
+        if (inStoreConditions.length > 0) {
+            inStoreQuery += ` WHERE ${inStoreConditions.join(' AND ')}`;
+        }
+
+        console.log('Executing In-Store Query:', inStoreQuery);
+        console.log('With params:', inStoreParams);
+        const inStoreResult = await client.query(inStoreQuery, inStoreParams);
+        inStoreRevenue = parseFloat(inStoreResult.rows[0]?.revenue || 0);
+        console.log('In-Store Revenue:', inStoreRevenue);
+        totalRevenue += inStoreRevenue; // Add to total
     }
 
-    // Add store condition for in-store
-    if (inStoreId) {
-      inStoreConditions.push(`store_id = $${inStoreParamIndex++}`);
-      inStoreParams.push(inStoreId);
-    } else if (store !== 'All') {
-      // Handle case where store is specified but doesn't match 'Wagga' or 'Preston' for in-store
-      // This prevents fetching if store is only online, perhaps? Or set condition to false.
-      // For now, let's assume if inStoreId is null, we don't filter (matches 'All' behavior implicitly for this part)
-       console.log("No specific inStoreId matched, not filtering in-store query by store_id.");
+    // --- Query 2: Online Revenue (Run if source is 'All' or 'Bite') --- 
+    let onlineRevenue = 0;
+    if (revenueSource === 'All' || revenueSource === 'Bite') { 
+        // IMPORTANT: Using SUM(total_price)
+        let onlineQuery = `SELECT COALESCE(SUM(total_price), 0) as revenue FROM bite_orders`;
+        const onlineParams = [];
+        const onlineConditions = [];
+        let onlineParamIndex = 1;
+
+        // Add date condition for online
+        if (areDatesValid) {
+            const startTimestamp = `${startDate} 00:00:00`;
+            const endTimestamp = `${endDate} 23:59:59`;
+            onlineConditions.push(`ready_at_time BETWEEN EXTRACT(EPOCH FROM $${onlineParamIndex++}::timestamp) AND EXTRACT(EPOCH FROM $${onlineParamIndex++}::timestamp)`);
+            onlineParams.push(startTimestamp, endTimestamp);
+        }
+
+        // Add store condition for online
+        if (onlineSiteId) {
+            onlineConditions.push(`site_id = $${onlineParamIndex++}`);
+            onlineParams.push(onlineSiteId);
+        } else if (store !== 'All') {
+            console.log("No specific onlineSiteId matched, not filtering online query by site_id.");
+        }
+
+        if (onlineConditions.length > 0) {
+            onlineQuery += ` WHERE ${onlineConditions.join(' AND ')}`;
+        }
+
+        console.log('Executing Online Query:', onlineQuery);
+        console.log('With params:', onlineParams);
+        const onlineResult = await client.query(onlineQuery, onlineParams);
+        onlineRevenue = parseFloat(onlineResult.rows[0]?.revenue || 0);
+        console.log('Online Revenue:', onlineRevenue);
+        totalRevenue += onlineRevenue; // Add to total
     }
-
-
-    if (inStoreConditions.length > 0) {
-      inStoreQuery += ` WHERE ${inStoreConditions.join(' AND ')}`;
-    }
-
-    console.log('Executing In-Store Query:', inStoreQuery);
-    console.log('With params:', inStoreParams);
-    const inStoreResult = await client.query(inStoreQuery, inStoreParams);
-    const inStoreRevenue = parseFloat(inStoreResult.rows[0]?.revenue || 0);
-    console.log('In-Store Revenue:', inStoreRevenue);
-    totalRevenue += inStoreRevenue;
-
-    // --- Query 2: Online Revenue ---
-    // IMPORTANT: Using SUM(total_price) instead of COUNT(*) from user example for revenue
-    let onlineQuery = `SELECT COALESCE(SUM(total_price), 0) as revenue FROM bite_orders`;
-    const onlineParams = [];
-    const onlineConditions = [];
-    let onlineParamIndex = 1;
-
-    // Add date condition for online (using epoch on ready_at_time)
-    if (areDatesValid) {
-      // Construct timestamps for start of startDate and end of endDate
-      const startTimestamp = `${startDate} 00:00:00`;
-      const endTimestamp = `${endDate} 23:59:59`;
-      // Corrected: Use ::timestamp cast on parameters
-      onlineConditions.push(`ready_at_time BETWEEN EXTRACT(EPOCH FROM $${onlineParamIndex++}::timestamp) AND EXTRACT(EPOCH FROM $${onlineParamIndex++}::timestamp)`);
-      onlineParams.push(startTimestamp, endTimestamp);
-    }
-
-    // Add store condition for online
-    if (onlineSiteId) {
-      onlineConditions.push(`site_id = $${onlineParamIndex++}`);
-      onlineParams.push(onlineSiteId);
-    } else if (store !== 'All') {
-      // Handle case where store is specified but doesn't match 'Wagga' or 'Preston' for online
-       console.log("No specific onlineSiteId matched, not filtering online query by site_id.");
-    }
-
-    if (onlineConditions.length > 0) {
-      onlineQuery += ` WHERE ${onlineConditions.join(' AND ')}`;
-    }
-
-    console.log('Executing Online Query:', onlineQuery);
-    console.log('With params:', onlineParams);
-    const onlineResult = await client.query(onlineQuery, onlineParams);
-    const onlineRevenue = parseFloat(onlineResult.rows[0]?.revenue || 0);
-    console.log('Online Revenue:', onlineRevenue);
-    totalRevenue += onlineRevenue;
 
     // --- Final Result ---
     const dateLogPart = areDatesValid ? ` for ${startDate} to ${endDate}` : '';
-    console.log(`Total Combined Revenue for store ${store}${dateLogPart}:`, totalRevenue);
+    const sourceLogPart = revenueSource === 'All' ? 'All Sources' : revenueSource;
+    console.log(`Total Revenue for store ${store} (${sourceLogPart})${dateLogPart}:`, totalRevenue);
 
-    res.status(200).json({ totalRevenue: totalRevenue }); // Send the summed revenue
+    res.status(200).json({ totalRevenue: totalRevenue }); // Send the final summed revenue
 
   } catch (err) {
     console.error('Error fetching total revenue:', err.stack);
