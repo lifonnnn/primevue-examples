@@ -1,30 +1,131 @@
 <script setup>
-const stats = [
+import { ref, onMounted, watch } from 'vue';
+import { format } from 'date-fns'; // Import date-fns for formatting
+
+// Define props received from App.vue - updated for dateRange
+const props = defineProps({
+  selectedStore: String,
+  dateRange: { // Expect an array [startDate, endDate]
+    type: Array,
+    required: true,
+    // Basic validation: Ensure it's an array of two potentially null dates
+    validator: (value) => Array.isArray(value) && value.length === 2
+  }
+  // Removed startDate and endDate
+});
+
+// Make stats reactive
+const stats = ref([
     {
         title: "Total Orders",
         icon: "pi-shopping-cart",
-        value: "1,234",
-        subtitle: "Last 7 days",
+        value: "-", // Default placeholder
+        subtitle: "Selected range", // Updated subtitle placeholder
     },
     {
         title: "Active Users",
         icon: "pi-users",
-        value: "2,573",
-        subtitle: "Last 7 days",
+        value: "-", // Default placeholder
+         subtitle: "Selected range", // Updated subtitle placeholder
     },
     {
         title: "Revenue",
         icon: "pi-dollar",
-        value: "$45,200",
-        subtitle: "Last 7 days",
+        value: "Loading...", // Initial loading state
+        subtitle: "Fetching...",
     },
     {
         title: "Success Rate",
         icon: "pi-chart-line",
-        value: "95%",
-        subtitle: "Last 7 days",
+        value: "-", // Default placeholder
+         subtitle: "Selected range", // Updated subtitle placeholder
     },
-];
+]);
+
+// Function to format currency
+const formatCurrency = (value) => {
+    // Use 'AUD' for Australian Dollar
+    return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(value);
+};
+
+// Function to format date range for subtitle
+const formatDateRangeSubtitle = (range) => {
+    if (!range || !range[0] || !range[1]) return 'Invalid range';
+    const start = format(range[0], 'dd MMM');
+    const end = format(range[1], 'dd MMM yyyy');
+    return `${start} - ${end}`;
+};
+
+// Function to fetch total revenue, now accepts store and dateRange
+const fetchTotalRevenue = async (store, range) => {
+    const revenueStat = stats.value.find(stat => stat.title === "Revenue");
+    if (!revenueStat) return;
+
+    // Check if range is valid before proceeding
+    if (!range || range.length !== 2 || !range[0] || !range[1]) {
+        console.error("Invalid date range provided to fetchTotalRevenue:", range);
+        revenueStat.value = "Error";
+        revenueStat.subtitle = "Invalid Date Range";
+        // Optionally update other stats to show error/invalid state
+        return;
+    }
+
+    revenueStat.value = "Loading..."; // Set loading state on fetch
+    revenueStat.subtitle = "Fetching...";
+
+    // Format dates for API query (YYYY-MM-DD)
+    const startDateFormatted = format(range[0], 'yyyy-MM-dd');
+    const endDateFormatted = format(range[1], 'yyyy-MM-dd');
+
+    try {
+        // Construct URL with query parameters for store, startDate, and endDate
+        const apiUrl = `http://localhost:3001/api/total-revenue?store=${encodeURIComponent(store)}&startDate=${startDateFormatted}&endDate=${endDateFormatted}`;
+        console.log('Fetching revenue from:', apiUrl); // Log the full URL
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+
+        revenueStat.value = formatCurrency(data.totalRevenue);
+         // Update subtitle to show store and date range
+        const storeSubtitle = store === 'All' ? `All stores` : store;
+        revenueStat.subtitle = `${storeSubtitle}, ${formatDateRangeSubtitle(range)}`;
+
+        // Update other stats' subtitles if needed (assuming they use the same range)
+         stats.value.forEach(stat => {
+             if (stat.title !== "Revenue") { // Avoid overwriting Revenue subtitle again
+                 stat.subtitle = formatDateRangeSubtitle(range);
+             }
+         });
+
+
+    } catch (error) {
+        console.error("Failed to fetch total revenue:", error);
+        revenueStat.value = "Error";
+        revenueStat.subtitle = "Failed to load";
+         // Update other stats' subtitles on error
+        stats.value.forEach(stat => {
+            if (stat.title !== "Revenue") {
+                stat.subtitle = "Failed to load";
+            }
+        });
+    }
+};
+
+// Fetch data when the component is mounted
+onMounted(() => {
+    // Pass both store and the initial dateRange
+    fetchTotalRevenue(props.selectedStore, props.dateRange);
+});
+
+// Watch for changes in selectedStore OR dateRange prop and re-fetch data
+watch(() => [props.selectedStore, props.dateRange], ([newStore, newRange]) => {
+    console.log('StatsWidget: Props changed, refetching revenue for:', newStore, newRange);
+     // Pass both store and the new dateRange
+    fetchTotalRevenue(newStore, newRange);
+}, { deep: true }); // Use deep watch if dateRange array might be mutated internally, though ref should trigger it
+
 </script>
 
 <template>

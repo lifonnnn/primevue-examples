@@ -1,8 +1,53 @@
 <script setup>
 import { useLayout } from "../composables/useLayout";
 import AppConfig from "./AppConfig.vue";
+import Dropdown from 'primevue/dropdown';
+import Calendar from 'primevue/calendar';
+import { ref, watch } from 'vue';
+
+// Define props received from App.vue
+const props = defineProps({
+  selectedStore: String,
+  stores: Array,
+  dateRange: {
+    type: Array,
+    required: true
+  }
+});
+
+// Define emits to notify App.vue of changes
+const emit = defineEmits(['update:selectedStore', 'update:dateRange']);
+
+// Use a local ref to manage the calendar's model, initialized from the prop
+const localDateRange = ref([...props.dateRange]);
+
+// Watch for changes in the prop and update the local ref
+watch(() => props.dateRange, (newRange) => {
+  localDateRange.value = [...newRange];
+});
 
 const { isDarkMode, toggleDarkMode } = useLayout();
+
+// Handle dropdown change and emit event
+const onStoreChange = (event) => {
+  // The dropdown v-model automatically updates the prop in the parent via the emit below
+  // but if you need to react immediately *in this component* you can use event.value
+  console.log("Topbar: Store selection changed to:", event.value);
+  // Emit the update event so v-model works in App.vue
+  emit('update:selectedStore', event.value);
+};
+
+// Handle date range change and emit event
+const onDateRangeChange = (newRange) => {
+    if (newRange && newRange.length === 2 && newRange[0] && newRange[1]) {
+        console.log("Topbar: Date range changed to:", newRange);
+        emit('update:dateRange', newRange);
+    } else if (newRange === null || (newRange && newRange.length === 1 && newRange[0] === null)) {
+         console.log("Topbar: Date range cleared or incomplete.");
+    }
+    localDateRange.value = newRange;
+};
+
 </script>
 
 <template>
@@ -27,15 +72,38 @@ const { isDarkMode, toggleDarkMode } = useLayout();
                     />
                 </svg>
                 <span class="topbar-brand-text">
-                    <span class="topbar-title">PrimeVue Examples</span>
-                    <span class="topbar-subtitle">Vite</span>
+                    <span class="topbar-title">Habibi Chicken Dashboard</span>
+                    <span class="topbar-subtitle">Analytics</span>
                 </span>
             </div>
-            <div class="topbar-actions">
-                <Button type="button" class="topbar-theme-button" @click="toggleDarkMode" text rounded>
+            <div class="topbar-actions items-center flex-wrap">
+                <div class="flex items-center mr-3 mb-2 md:mb-0">
+                    <span class="mr-2 text-sm">Location:</span>
+                    <Dropdown
+                        :modelValue="props.selectedStore"
+                        :options="props.stores"
+                        placeholder="Select Store"
+                        class="w-full md:w-12rem p-inputtext-sm"
+                        @change="onStoreChange"
+                    />
+                </div>
+                <div class="flex items-center mr-3 mb-2 md:mb-0">
+                    <span class="mr-2 text-sm">Date Range:</span>
+                    <Calendar
+                        v-model="localDateRange"
+                        @update:modelValue="onDateRangeChange"
+                        selectionMode="range"
+                        dateFormat="yy-mm-dd"
+                        placeholder="Select Date Range"
+                        showIcon
+                        class="w-full md:w-14rem p-inputtext-sm"
+                        :manualInput="false"
+                    />
+                </div>
+                <Button type="button" class="topbar-theme-button mr-2 mb-2 md:mb-0" @click="toggleDarkMode" text rounded>
                     <i :class="['pi ', 'pi ', { 'pi-moon': isDarkMode, 'pi-sun': !isDarkMode }]" />
                 </Button>
-                <div class="relative">
+                <div class="relative mb-2 md:mb-0">
                     <Button
                         v-styleclass="{
                             selector: '@next',
