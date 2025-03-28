@@ -171,14 +171,14 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, 
      overflow-x: auto; /* Allow horizontal scroll if needed on small screens */
 }
 
-/* Make table text slightly smaller */
+/* Make table text slightly larger (adjust as needed) */
 .products-table.p-datatable-sm .p-datatable-tbody > tr > td {
-    padding: 0.5rem 0.75rem; /* Adjust padding */
-     font-size: 0.875rem; /* Smaller font size */
+    padding: 0.6rem 0.8rem; /* Slightly increase padding too */
+     font-size: 1rem; /* Increased font size */
 }
 .products-table.p-datatable-sm .p-datatable-thead > tr > th {
-     padding: 0.5rem 0.75rem;
-     font-size: 0.875rem;
+     padding: 0.6rem 0.8rem; /* Match padding */
+     font-size: 1rem; /* Increased font size */
 }
 
 .loading-indicator,
@@ -203,8 +203,7 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, 
     justify-content: flex-end; /* For flex layouts within cells if any */
 }
 
-/* Ensure text alignment if needed via CSS */
-/* Adjust nth-child for removed column */
+/* Adjust nth-child for removed column and ensure alignment */
 .products-table .p-datatable-tbody > tr > td:nth-child(2), /* Qty Sold */
 .products-table .p-datatable-tbody > tr > td:nth-child(3) { /* Total Revenue */
     text-align: right;

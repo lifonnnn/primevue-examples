@@ -230,7 +230,7 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
 <style scoped>
 .widget-sales-trend {
     /* Add specific styles if needed, e.g., min-height */
-     min-height: 300px; /* Ensure card has some height */
+     min-height: 450px; /* Increased height */
      display: flex;
      flex-direction: column;
 }
@@ -243,7 +243,7 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
 .chart-container {
   position: relative;
   /* Adjust height relative to card size */
-  height: 320px; /* Increased height from 250px */
+  height: 400px; /* Increased height */
   width: 100%;
 }
 
