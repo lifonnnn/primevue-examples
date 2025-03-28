@@ -2,7 +2,7 @@
 
 This file documents the recent changes and features implemented in the dashboard application.
 
-## [Unreleased] - YYYY-MM-DD (Replace Date)
+## [Unreleased] - 2024-07-10
 
 ### Added
 
@@ -18,6 +18,12 @@ This file documents the recent changes and features implemented in the dashboard
     *   The results of these two queries are summed to provide the final `totalRevenue`.
 *   **Dependency:** Added `date-fns` for frontend date formatting (`StatsWidget.vue`).
 *   **Logging:** Added more detailed logging to the backend API endpoint.
+*   **Top Selling Products Widget:**
+    *   Replaced static `RecentActivityWidget` with dynamic `TopProductsWidget`.
+    *   Created backend API endpoint (`/api/top-products`) to fetch aggregated product sales data from `bite_order_items` (online) and `transaction_items` (in-store).
+    *   Handles filtering by store, date range, and revenue source (All, In Store, Bite).
+    *   Displays Product Identifier (Name for online, ID for in-store - awaiting mapping), Quantity Sold, and Total Revenue.
+    *   Uses PrimeVue `DataTable` with dynamic columns.
 
 ### Changed
 
@@ -28,8 +34,15 @@ This file documents the recent changes and features implemented in the dashboard
 *   Updated `StatsWidget.vue` to accept the `selectedRevenueSource` prop, include it in API calls, and update its watcher.
 *   Updated `StatsWidget.vue` subtitle to include the selected revenue source.
 *   Backend revenue calculation no longer uses `UNION ALL`.
+*   Renamed `src/components/dashboard/ProductOverviewWidget.vue` to `src/components/dashboard/TopProductsWidget.vue`.
+*   Adjusted layout in `src/App.vue` to place `SalesTrendWidget` and `TopProductsWidget` side-by-side in a row.
+*   Added vertical spacing between dashboard widgets in `src/App.vue` using margins.
 
 ### Fixed
 
 *   Resolved discrepancy where the revenue widget initially showed all-time revenue instead of the default last 7 days, by implementing backend date filtering.
-*   Corrected SQL syntax error in the backend `/api/total-revenue` endpoint related to parameter casting for timestamp comparisons (`EXTRACT(EPOCH FROM $1::timestamp)`). 
+*   Corrected SQL syntax error in the backend `/api/total-revenue` endpoint related to parameter casting for timestamp comparisons (`EXTRACT(EPOCH FROM $1::timestamp)`).
+*   Resolved "Maximum recursive updates exceeded" error in `TopProductsWidget` by simplifying `DataTable` configuration and data handling.
+*   Fixed backend SQL parameter error ("could not determine data type") in `/api/top-products` by correctly matching query parameters.
+*   Corrected initial date validation failure in `/api/top-products`.
+*   Fixed Vite build error by removing unused `ProductOverviewWidget` import/usage. 

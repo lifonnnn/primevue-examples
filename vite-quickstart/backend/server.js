@@ -519,37 +519,36 @@ app.get('/api/top-products', async (req, res) => {
 
         // --- Construct the SQL Query - REVISED INDICES ---
         const query = `
-            WITH online_products AS (
+            WITH instore_products AS (
                 SELECT
-                    boi.name AS product_identifier, -- Use name for online
-                    'Online' AS source_type,
-                    SUM(boi.quantity) AS total_quantity,
-                    SUM(boi.line_price) AS total_revenue
-                FROM bite_order_items boi
-                JOIN bite_orders bo ON boi.order_id = bo.order_id
-                WHERE
-                    ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'Bite')
-                    AND ($${onlineSiteIdParamIndex}::varchar IS NULL OR bo.site_id = $${onlineSiteIdParamIndex}::varchar)
-                    AND bo.ready_at_time BETWEEN EXTRACT(EPOCH FROM $${onlineStartDateParamIndex}::timestamp) AND EXTRACT(EPOCH FROM $${onlineEndDateParamIndex}::timestamp)
-                GROUP BY boi.name
-            ),
-            instore_products AS (
-                SELECT
-                    ti.product_id::text AS product_identifier, -- Use product_id (as text) for in-store
+                    ti.product_id::text AS product_identifier,
                     'In-Store' AS source_type,
                     SUM(ti.quantity) AS total_quantity,
-                    SUM(ti.unit_price * ti.quantity) AS total_revenue -- Approximate revenue calculation
+                    SUM(ti.unit_price * ti.quantity) AS total_revenue
                 FROM transaction_items ti
                 JOIN transactions t ON ti.transaction_id = t.id
                 WHERE
-                    ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'In Store')
-                    AND ($${inStoreIdParamIndex}::varchar IS NULL OR t.store_id = $${inStoreIdParamIndex}::varchar)
-                    AND t.transaction_date >= $${inStoreStartDateParamIndex}::date
-                    AND t.transaction_date < $${inStoreEndDateParamIndex}::date
-                    -- Filter out items with zero or null quantity/price if needed
+                    ($1 = 'All' OR $1 = 'In Store') -- $1: revenueSource
+                    AND ($3::varchar IS NULL OR t.store_id = $3::varchar) -- $3: inStoreId
+                    AND t.transaction_date >= $4::date -- $4: adjustedStartDate
+                    AND t.transaction_date < $5::date -- $5: adjustedEndDateExclusive
                     AND ti.quantity > 0 AND ti.unit_price > 0
                 GROUP BY ti.product_id
             ),
+            online_products AS (
+                 SELECT
+                     boi.name AS product_identifier,
+                     'Online' AS source_type,
+                     SUM(boi.quantity) AS total_quantity,
+                     SUM(boi.line_price) AS total_revenue
+                 FROM bite_order_items boi
+                 JOIN bite_orders bo ON boi.order_id = bo.order_id
+                 WHERE
+                     ($1 = 'All' OR $1 = 'Bite') -- $1: revenueSource
+                     AND ($6::varchar IS NULL OR bo.site_id = $6::varchar) -- $6: onlineSiteId
+                     AND bo.ready_at_time BETWEEN EXTRACT(EPOCH FROM $7::timestamp) AND EXTRACT(EPOCH FROM $8::timestamp) -- $7, $8: timestamps
+                 GROUP BY boi.name
+             ),
             combined_products AS (
                 SELECT product_identifier, source_type, total_quantity, total_revenue FROM online_products
                 UNION ALL
@@ -566,13 +565,13 @@ app.get('/api/top-products', async (req, res) => {
             SELECT
                 ap.product_identifier,
                 ap.final_quantity,
-                ap.final_revenue::float -- Ensure float output
+                ap.final_revenue::float
             FROM aggregated_products ap
-            ORDER BY ap.final_revenue DESC NULLS LAST -- Order by revenue, highest first
-            LIMIT $${limitParamIndex}; -- Apply limit
+            ORDER BY final_revenue DESC NULLS LAST
+            LIMIT $2; -- $2: productLimit
         `;
 
-        console.log('Executing Top Products Query:', query.substring(0, 500) + '...'); // Log truncated query
+        console.log('Executing Top Products Query (Simple):', query.substring(0, 500) + '...');
         console.log('With params:', params);
 
         const result = await client.query(query, params);

@@ -129,7 +129,7 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, 
                         :header="col.header"
                         :style="col.style">
                         <template v-if="col.field === 'final_revenue'" #body="{ data }">
-                             {{ formatCurrency(data.final_revenue) }}
+                             {{ formatCurrency(data[col.field]) }}
                         </template>
                     </Column>
                 </DataTable>
@@ -204,7 +204,7 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, 
 }
 
 /* Ensure text alignment if needed via CSS */
-/* Adjust nth-child since rank column is removed */
+/* Adjust nth-child for removed column */
 .products-table .p-datatable-tbody > tr > td:nth-child(2), /* Qty Sold */
 .products-table .p-datatable-tbody > tr > td:nth-child(3) { /* Total Revenue */
     text-align: right;
