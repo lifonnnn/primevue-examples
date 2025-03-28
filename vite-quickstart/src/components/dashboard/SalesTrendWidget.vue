@@ -2,6 +2,7 @@
 import { ref, watch, computed, onMounted } from 'vue';
 import { format } from 'date-fns';
 import Chart from 'primevue/chart';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
 
 // Define props
 const props = defineProps({
@@ -74,7 +75,7 @@ const chartData = computed(() => {
     const documentStyle = getComputedStyle(document.documentElement);
 
     return {
-        labels: trendData.value.map(item => format(new Date(item.date + 'T00:00:00'), 'dd MMM')), // Format date for label, ensure correct parsing
+        labels: trendData.value.map(item => format(new Date(item.date + 'T00:00:00'), 'eee dd MMM')), // Updated format
         datasets: [
             {
                 label: 'Daily Sales',
@@ -114,6 +115,26 @@ const chartOptions = ref({
                     return label;
                 }
             }
+        },
+        datalabels: {
+            display: 'auto',
+            anchor: 'end',
+            align: 'top',
+            clamp: true,
+            offset: 4,
+            color: getComputedStyle(document.documentElement).getPropertyValue('--p-text-muted-color') || '#6c757d',
+            font: {
+                size: 11,
+                weight: 'bold'
+            },
+            formatter: function(value, context) {
+                return new Intl.NumberFormat('en-AU', {
+                    style: 'currency',
+                    currency: 'AUD',
+                    notation: 'compact',
+                    maximumFractionDigits: 1
+                }).format(value);
+            },
         }
     },
     scales: {
@@ -194,7 +215,13 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
                 No sales data available for the selected period.
              </div>
             <div v-else class="chart-container">
-                 <Chart type="line" :data="chartData" :options="chartOptions" class="chart-canvas" />
+                 <Chart
+                     type="line"
+                     :data="chartData"
+                     :options="chartOptions"
+                     :plugins="[ChartDataLabels]"
+                     class="chart-canvas"
+                 />
             </div>
         </div>
     </div>
@@ -216,7 +243,7 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
 .chart-container {
   position: relative;
   /* Adjust height relative to card size */
-  height: 250px; /* Example height, adjust as needed */
+  height: 320px; /* Increased height from 250px */
   width: 100%;
 }
 
