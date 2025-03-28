@@ -33,6 +33,12 @@ const rawOrdersData = ref({
     error: false   // Add error state
 });
 
+// --- State for ATV Breakdown ---
+const inStoreATVText = ref('Calculating...'); // Keep text version for potential display elsewhere if needed
+const onlineATVText = ref('Calculating...');
+const rawInStoreATV = ref(null);          // Store raw numeric value for chart
+const rawOnlineATV = ref(null);           // Store raw numeric value for chart
+
 // Make stats reactive
 const stats = ref([
     {
@@ -53,6 +59,13 @@ const stats = ref([
         value: "Loading...",
         subtitle: "Fetching...",
     },
+    // --- Add Placeholder Card --- 
+    {
+        title: "Placeholder",
+        icon: "pi-question-circle",
+        value: "N/A",
+        subtitle: "Future use",
+    }
 ]);
 
 // Function to format currency
@@ -81,12 +94,26 @@ const isRangeValid = (range) => {
 };
 
 const getBaseSubtitle = (store, source) => {
-    const storeSubtitle = store === 'All' ? 'All stores' : store;
-    const sourceSubtitle = source === 'All' ? 'All Sources' : source;
+    // Map store value to display label
+    let storeSubtitle = 'All stores'; // Default
+    if (store === 'Wagga') {
+        storeSubtitle = 'Wagga Wagga';
+    } else if (store === 'Preston') {
+        storeSubtitle = 'Preston, Melbourne';
+    }
+
+    // Map source value to display label
+    let sourceSubtitle = 'All Sources'; // Default
+    if (source === 'In Store') {
+        sourceSubtitle = 'In Store Orders';
+    } else if (source === 'Bite') {
+        sourceSubtitle = 'Bite Online Orders';
+    }
+
     return `${storeSubtitle}, ${sourceSubtitle}`;
 };
 
-// --- Chart Configuration ---
+// --- Chart Configuration (Main Doughnuts) ---
 const chartOptions = ref({
     responsive: true,
     maintainAspectRatio: false, // Adjust if needed for sizing within card
@@ -259,38 +286,142 @@ const fetchTotalOrders = async (store, range, source) => {
     }
 };
 
-// --- ATV Calculation ---
+// --- ATV Calculation (including raw values) ---
 watchEffect(() => {
     const atvStat = stats.value.find(s => s.title === "Avg. Transaction Value");
     if (!atvStat) return;
 
-    const revenue = rawRevenueData.value.total;
-    const orders = rawOrdersData.value.total;
-    const revenueLoading = rawRevenueData.value.loading;
-    const ordersLoading = rawOrdersData.value.loading;
-    const revenueError = rawRevenueData.value.error;
-    const ordersError = rawOrdersData.value.error;
+    const revenueData = rawRevenueData.value;
+    const ordersData = rawOrdersData.value;
+
+    // Reset raw ATV values
+    rawInStoreATV.value = null;
+    rawOnlineATV.value = null;
 
     // Update subtitle based on overall state
-     const dateSubtitle = isRangeValid(props.dateRange) ? formatDateRangeSubtitle(props.dateRange) : 'Invalid Range';
-     const baseSub = getBaseSubtitle(props.selectedStore, props.selectedRevenueSource);
+    const dateSubtitle = isRangeValid(props.dateRange) ? formatDateRangeSubtitle(props.dateRange) : 'Invalid Range';
+    const baseSub = getBaseSubtitle(props.selectedStore, props.selectedRevenueSource);
 
-    if (revenueLoading || ordersLoading) {
+    // Determine overall loading/error state for ATV card
+    const isLoading = revenueData.loading || ordersData.loading;
+    const isError = revenueData.error || ordersData.error || !isRangeValid(props.dateRange);
+
+    if (isLoading) {
         atvStat.value = "Loading...";
         atvStat.subtitle = "Calculating...";
-    } else if (revenueError || ordersError || !isRangeValid(props.dateRange)) {
+        inStoreATVText.value = "Loading...";
+        onlineATVText.value = "Loading...";
+    } else if (isError) {
         atvStat.value = "Error";
-        atvStat.subtitle = revenueError || ordersError ? "Failed to load data" : "Invalid Date Range";
-    } else if (typeof revenue === 'number' && typeof orders === 'number') {
-        if (orders === 0) {
-            atvStat.value = formatCurrency(0); // Or 'N/A' if preferred
+        atvStat.subtitle = revenueData.error || ordersData.error ? "Failed to load data" : "Invalid Date Range";
+        inStoreATVText.value = "Error";
+        onlineATVText.value = "Error";
+    } else if (typeof revenueData.total === 'number' && typeof ordersData.total === 'number') {
+        // Calculate Overall ATV
+        atvStat.value = ordersData.total === 0 ? formatCurrency(0) : formatCurrency(revenueData.total / ordersData.total);
+        atvStat.subtitle = `${baseSub}, ${dateSubtitle}`;
+
+        // Calculate In-Store ATV (Raw and Text)
+        if (typeof revenueData.inStore === 'number' && typeof ordersData.inStore === 'number') {
+            rawInStoreATV.value = ordersData.inStore === 0 ? 0 : (revenueData.inStore / ordersData.inStore);
+            inStoreATVText.value = formatCurrency(rawInStoreATV.value);
         } else {
-            atvStat.value = formatCurrency(revenue / orders);
+             inStoreATVText.value = "N/A"; 
         }
-         atvStat.subtitle = `${baseSub}, ${dateSubtitle}`;
+
+        // Calculate Online ATV (Raw and Text)
+        if (typeof revenueData.online === 'number' && typeof ordersData.online === 'number') {
+            rawOnlineATV.value = ordersData.online === 0 ? 0 : (revenueData.online / ordersData.online);
+            onlineATVText.value = formatCurrency(rawOnlineATV.value);
+        } else {
+            onlineATVText.value = "N/A";
+        }
+
     } else {
-         atvStat.value = "Error"; // Fallback for unexpected data types
-         atvStat.subtitle = "Calculation error";
+        atvStat.value = "Error"; // Fallback for unexpected data types
+        atvStat.subtitle = "Calculation error";
+        inStoreATVText.value = "Error";
+        onlineATVText.value = "Error";
+    }
+});
+
+// --- ATV Comparison Chart Data ---
+const atvComparisonChartData = computed(() => {
+    const inStore = rawInStoreATV.value;
+    const online = rawOnlineATV.value;
+
+    // Only return data if both values are valid numbers
+    if (typeof inStore !== 'number' || typeof online !== 'number') {
+        return null;
+    }
+
+    const documentStyle = getComputedStyle(document.documentElement);
+    const cyanColor = documentStyle.getPropertyValue('--p-cyan-500') || '#06b6d4';
+    const orangeColor = documentStyle.getPropertyValue('--p-orange-500') || '#f97316';
+
+    return {
+        labels: ['In-Store', 'Online'],
+        datasets: [
+            {
+                label: 'ATV',
+                backgroundColor: [cyanColor, orangeColor],
+                data: [inStore, online],
+                borderWidth: 0, // No border for cleaner look
+                barThickness: 15, // Make bars relatively thin
+            }
+        ]
+    };
+});
+
+// --- ATV Comparison Chart Options ---
+const atvComparisonChartOptions = ref({
+    indexAxis: 'y', // Horizontal bars
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+        legend: {
+            display: false // No legend needed for 2 bars
+        },
+        tooltip: {
+            callbacks: {
+                // Format tooltip label as currency
+                label: function(context) {
+                    let label = context.dataset.label || '';
+                    if (label) {
+                        label += ': ';
+                    }
+                    if (context.parsed.x !== null) {
+                        label += formatCurrency(context.parsed.x);
+                    }
+                    return label;
+                }
+            }
+        }
+    },
+    scales: {
+        x: { // Value axis (now horizontal)
+            display: true,
+            ticks: {
+                display: true,
+                 color: 'var(--p-text-color)', // Changed to theme text color
+                 font: { size: 10 },
+                 // Optional: Format ticks as compact currency
+            },
+             grid: {
+                color: 'var(--p-surface-border)'
+            }
+        },
+        y: { // Category axis (now vertical)
+            display: true,
+            ticks: {
+                display: true,
+                 color: 'var(--p-text-color)', // Changed to theme text color
+                 font: { size: 10 },
+            },
+            grid: {
+                color: 'transparent' 
+            }
+        }
     }
 });
 
@@ -335,21 +466,35 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
             </div>
             <div class="stats-content">
                 <div class="stats-value">{{ stat.value }}</div>
-                <div class="stats-subtitle">{{ stat.subtitle }}</div>
 
-                <!-- Add Revenue Chart -->
+                <!-- Replace ATV Text Breakdown with Chart -->
+                <div v-if="stat.title === 'Avg. Transaction Value'" class="atv-chart-container mt-2"> 
+                    <div v-if="atvComparisonChartData" class="relative h-16"> <!-- Small fixed height container -->
+                        <Chart 
+                            type="bar" 
+                            :data="atvComparisonChartData" 
+                            :options="atvComparisonChartOptions" 
+                            class="h-full w-full"
+                         />
+                    </div>
+                    <!-- Optional: Add simple loading/error text if chart data is null/error -->
+                     <div v-else-if="rawRevenueData.loading || rawOrdersData.loading" class="text-xs text-center text-muted-color mt-2">Loading comparison...</div>
+                     <div v-else-if="rawRevenueData.error || rawOrdersData.error" class="text-xs text-center text-red-500 mt-2">Comparison error</div>
+                </div>
+
+                <div class="stats-subtitle mt-1">{{ stat.subtitle }}</div>
+
+                <!-- Revenue Doughnut Chart -->
                 <div v-if="stat.title === 'Revenue' && revenueChartData" class="chart-container mt-4">
                      <Chart type="doughnut" :data="revenueChartData" :options="chartOptions" class="chart-canvas" />
                 </div>
-                 <!-- Add Loader/Error state for Revenue Chart -->
                  <div v-else-if="stat.title === 'Revenue' && rawRevenueData.loading" class="chart-container mt-4 text-center">Loading Chart...</div>
                  <div v-else-if="stat.title === 'Revenue' && rawRevenueData.error" class="chart-container mt-4 text-center text-red-500">Chart Error</div>
 
-                <!-- Add Orders Chart -->
+                <!-- Orders Doughnut Chart -->
                  <div v-if="stat.title === 'Total Orders' && ordersChartData" class="chart-container mt-4">
                      <Chart type="doughnut" :data="ordersChartData" :options="chartOptions" class="chart-canvas" />
                  </div>
-                 <!-- Add Loader/Error state for Orders Chart -->
                  <div v-else-if="stat.title === 'Total Orders' && rawOrdersData.loading" class="chart-container mt-4 text-center">Loading Chart...</div>
                  <div v-else-if="stat.title === 'Total Orders' && rawOrdersData.error" class="chart-container mt-4 text-center text-red-500">Chart Error</div>
 
@@ -369,6 +514,18 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
 
 .chart-canvas {
   /* Ensure canvas stretches if needed, but maintainAspectRatio might handle this */
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Styles for the small ATV chart container */
+.atv-chart-container {
+    width: 100%; /* Take full width */
+}
+
+/* Ensure canvas fills its container */
+.chart-canvas, 
+.atv-chart-container .p-chart { /* Target chart component within ATV container */
   width: 100% !important;
   height: 100% !important;
 }

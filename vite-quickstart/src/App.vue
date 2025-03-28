@@ -9,7 +9,11 @@ import ProductOverviewWidget from "./components/dashboard/ProductOverviewWidget.
 
 // Shared state for selected store
 const selectedStore = ref('All');
-const stores = ref([ { label: 'All Locations', value: 'All' }, 'Wagga', 'Preston' ]);
+const stores = ref([ 
+    { label: 'All Locations', value: 'All' }, 
+    { label: 'Wagga Wagga', value: 'Wagga' },
+    { label: 'Preston, Melbourne', value: 'Preston' }
+]);
 
 // Shared state for dates - replaced startDate and endDate with dateRange
 // Initialize with default: last 7 days
@@ -59,7 +63,11 @@ const handleRevenueSourceChange = (newSource) => {
                 :selectedRevenueSource="selectedRevenueSource"
             />
             <div class="layout-grid-row">
-                <SalesTrendWidget />
+                 <SalesTrendWidget 
+                    :selectedStore="selectedStore"
+                    :dateRange="dateRange"
+                    :selectedRevenueSource="selectedRevenueSource"
+                />
                 <RecentActivityWidget />
             </div>
             <ProductOverviewWidget />

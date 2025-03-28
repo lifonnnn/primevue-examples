@@ -106,7 +106,11 @@ const onDateRangeChange = (newRange) => {
                     <Select
                         inputId="topbar-revenue-select"
                         :modelValue="props.selectedRevenueSource"
-                        :options="[ { label: 'In Store & Bite', value: 'All' }, 'In Store', 'Bite' ]"
+                        :options="[
+                            { label: 'In Store & Bite', value: 'All' },
+                            { label: 'In Store Orders', value: 'In Store' },
+                            { label: 'Bite Online Orders', value: 'Bite' }
+                        ]"
                         optionLabel="label"
                         optionValue="value"
                         placeholder=" "

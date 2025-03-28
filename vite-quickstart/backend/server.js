@@ -322,6 +322,139 @@ app.get('/api/total-orders', async (req, res) => {
   }
 });
 
+// --- Get Sales Trend Data ---
+app.get('/api/sales-trend', async (req, res) => {
+    const { store, startDate, endDate, source } = req.query;
+    const revenueSource = source || 'All';
+    console.log(`GET /api/sales-trend received - Store: ${store}, Source: ${revenueSource}, Start: ${startDate}, End: ${endDate}`);
+
+    // --- Basic Date Validation ---
+    const areDatesValid = startDate && endDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate);
+    if (!areDatesValid) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD for both startDate and endDate.' });
+    }
+    console.log(`Date parameters are valid.`);
+    // --- End Date Validation ---
+
+    let client;
+    try {
+        client = await pool.connect();
+        console.log('DB client connected for sales trend');
+
+        // Map frontend selection to database identifiers
+        const onlineSiteId = store === 'Wagga' ? '641' : store === 'Preston' ? '1837' : null;
+        const inStoreId = store === 'Wagga' ? 'wagga' : store === 'Preston' ? 'preston' : null;
+
+        // --- Prepare parameters for the complex query ---
+        const params = [];
+        let paramIndex = 1;
+
+        params.push(startDate); // $1: start date for series
+        const startDateParamIndex = paramIndex++;
+        params.push(endDate);   // $2: end date for series
+        const endDateParamIndex = paramIndex++;
+
+        // In-store query part conditions and params
+        params.push(revenueSource); // $3: source for in-store check 1
+        const inStoreSourceCheck1ParamIndex = paramIndex++;
+        params.push('In Store');     // $4: source for in-store check 2
+        const inStoreSourceCheck2ParamIndex = paramIndex++;
+        
+        const includeInStore = revenueSource === 'All' || revenueSource === 'In Store';
+        const filterInStoreByStoreId = includeInStore && store !== 'All' && inStoreId;
+        params.push(filterInStoreByStoreId ? inStoreId : null); // $5: store_id for in-store (or null)
+        const inStoreIdParamIndex = paramIndex++;
+
+        // In-store date range workaround
+        const adjustedStartDate = addDays(startDate, 1); // Add 1 day
+        const adjustedEndDateExclusive = addDays(endDate, 2); // Add 2 days for < comparison
+        params.push(adjustedStartDate); // $6: adjusted start date for in-store
+        const inStoreStartDateParamIndex = paramIndex++;
+        params.push(adjustedEndDateExclusive); // $7: adjusted end date for in-store
+        const inStoreEndDateParamIndex = paramIndex++;
+
+        // Online query part conditions and params
+        params.push(revenueSource); // $8: source for online check 1
+        const onlineSourceCheck1ParamIndex = paramIndex++;
+        params.push('Bite');         // $9: source for online check 2
+        const onlineSourceCheck2ParamIndex = paramIndex++;
+
+        const includeOnline = revenueSource === 'All' || revenueSource === 'Bite';
+        const filterOnlineBySiteId = includeOnline && store !== 'All' && onlineSiteId;
+        params.push(filterOnlineBySiteId ? onlineSiteId : null); // $10: site_id for online (or null)
+        const onlineSiteIdParamIndex = paramIndex++;
+
+        // Online date range (epoch)
+        const startTimestamp = `${startDate} 00:00:00`;
+        const endTimestamp = `${endDate} 23:59:59`;
+        params.push(startTimestamp); // $11: start timestamp for online
+        const onlineStartDateParamIndex = paramIndex++;
+        params.push(endTimestamp);   // $12: end timestamp for online
+        const onlineEndDateParamIndex = paramIndex++;
+        
+        // --- Construct the SQL Query --- 
+        const query = `
+            WITH date_series AS (
+              SELECT generate_series(
+                       $${startDateParamIndex}::date,
+                       $${endDateParamIndex}::date,
+                       '1 day'::interval
+                     )::date AS sale_date
+            ),
+            daily_sales AS (
+                -- In-Store Sales (adjusted date for joining)
+                SELECT 
+                    transaction_date::date - interval '1 day' AS sale_date, -- Adjust back to actual date
+                    SUM(total_amount) as daily_revenue
+                FROM transactions
+                WHERE 
+                    ($${inStoreSourceCheck1ParamIndex} = 'All' OR $${inStoreSourceCheck2ParamIndex} = 'In Store')
+                    AND ($${inStoreIdParamIndex}::varchar IS NULL OR store_id = $${inStoreIdParamIndex}::varchar)
+                    AND transaction_date >= $${inStoreStartDateParamIndex}::date
+                    AND transaction_date < $${inStoreEndDateParamIndex}::date
+                GROUP BY transaction_date -- Group by stored date
+            
+                UNION ALL
+            
+                -- Online Sales (timezone adjusted date for joining)
+                SELECT 
+                    (timezone('Australia/Sydney', TO_TIMESTAMP(ready_at_time)))::date AS sale_date,
+                    SUM(total_price) as daily_revenue
+                FROM bite_orders
+                WHERE
+                    ($${onlineSourceCheck1ParamIndex} = 'All' OR $${onlineSourceCheck2ParamIndex} = 'Bite')
+                    AND ($${onlineSiteIdParamIndex}::varchar IS NULL OR site_id = $${onlineSiteIdParamIndex}::varchar)
+                    AND ready_at_time BETWEEN EXTRACT(EPOCH FROM $${onlineStartDateParamIndex}::timestamp) AND EXTRACT(EPOCH FROM $${onlineEndDateParamIndex}::timestamp)
+                GROUP BY (timezone('Australia/Sydney', TO_TIMESTAMP(ready_at_time)))::date
+            )
+            SELECT 
+                to_char(ds.sale_date, 'YYYY-MM-DD') AS date,
+                COALESCE(SUM(agg.daily_revenue), 0)::float as sales -- Ensure float output
+            FROM date_series ds
+            LEFT JOIN daily_sales agg ON ds.sale_date = agg.sale_date
+            GROUP BY ds.sale_date
+            ORDER BY ds.sale_date ASC;
+        `;
+
+        console.log('Executing Sales Trend Query:', query); // Log the query structure
+        console.log('With params:', params); // Log the parameters
+
+        const result = await client.query(query, params);
+        console.log(`Sales Trend Query returned ${result.rows.length} rows.`);
+
+        res.status(200).json(result.rows);
+
+    } catch (err) {
+        console.error('Error fetching sales trend:', err.stack);
+        res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    } finally {
+        if (client) {
+            client.release();
+            console.log('DB client released after sales trend query');
+        }
+    }
+});
+
 // --- Server Start ---
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
