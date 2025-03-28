@@ -5,6 +5,7 @@ import AppFooter from "./components/AppFooter.vue";
 import StatsWidget from "./components/dashboard/StatsWidget.vue";
 import SalesTrendWidget from "./components/dashboard/SalesTrendWidget.vue";
 import TopProductsWidget from "./components/dashboard/TopProductsWidget.vue";
+import PeakTimeWidget from "./components/dashboard/PeakTimeWidget.vue";
 
 // Shared state for selected store
 const selectedStore = ref('All');
@@ -75,6 +76,12 @@ const handleRevenueSourceChange = (newSource) => {
                     :limit="10"
                 />
             </div>
+            <PeakTimeWidget
+                :selectedStore="selectedStore"
+                :dateRange="dateRange"
+                :selectedRevenueSource="selectedRevenueSource"
+                class="mb-4 col-12"
+            />
         </div>
         <AppFooter />
     </div>

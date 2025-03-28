@@ -592,6 +592,122 @@ app.get('/api/top-products', async (req, res) => {
     }
 });
 
+// --- Get Sales Activity Data (for Heatmap) ---
+app.get('/api/sales-activity', async (req, res) => {
+    const { store, startDate, endDate, source } = req.query;
+    const revenueSource = source || 'All';
+
+    console.log(`GET /api/sales-activity received - Store: ${store}, Source: ${revenueSource}, Start: ${startDate}, End: ${endDate}`);
+
+    // --- Basic Date Validation ---
+    const areDatesValid = startDate && endDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate);
+    if (!areDatesValid) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD for both startDate and endDate.' });
+    }
+    console.log(`Date parameters are valid.`);
+    // --- End Date Validation ---
+
+    let client;
+    try {
+        client = await pool.connect();
+        console.log('DB client connected for sales activity');
+
+        // Map frontend selection to database identifiers
+        const onlineSiteId = store === 'Wagga' ? '641' : store === 'Preston' ? '1837' : null;
+        const inStoreId = store === 'Wagga' ? 'wagga' : store === 'Preston' ? 'preston' : null;
+
+        // --- Prepare parameters ---
+        const params = [];
+        let paramIndex = 1;
+
+        // Common params
+        params.push(revenueSource); // $1: sourceParamIndex
+        const sourceParamIndex = paramIndex++;
+
+        // In-store specific params
+        const includeInStore = revenueSource === 'All' || revenueSource === 'In Store';
+        const filterInStoreByStoreId = includeInStore && store !== 'All' && inStoreId;
+        params.push(filterInStoreByStoreId ? inStoreId : null); // $2: inStoreIdParamIndex
+        const inStoreIdParamIndex = paramIndex++;
+        const adjustedStartDate = addDays(startDate, 1);
+        const adjustedEndDateExclusive = addDays(endDate, 2);
+        params.push(adjustedStartDate); // $3: inStoreStartDateParamIndex
+        const inStoreStartDateParamIndex = paramIndex++;
+        params.push(adjustedEndDateExclusive); // $4: inStoreEndDateParamIndex
+        const inStoreEndDateParamIndex = paramIndex++;
+
+        // Online specific params
+        const includeOnline = revenueSource === 'All' || revenueSource === 'Bite';
+        const filterOnlineBySiteId = includeOnline && store !== 'All' && onlineSiteId;
+        params.push(filterOnlineBySiteId ? onlineSiteId : null); // $5: onlineSiteIdParamIndex
+        const onlineSiteIdParamIndex = paramIndex++;
+        const startTimestamp = `${startDate} 00:00:00`;
+        const endTimestamp = `${endDate} 23:59:59`;
+        params.push(startTimestamp); // $6: onlineStartDateParamIndex
+        const onlineStartDateParamIndex = paramIndex++;
+        params.push(endTimestamp);   // $7: onlineEndDateParamIndex
+        const onlineEndDateParamIndex = paramIndex++;
+
+        // --- Construct the SQL Query ---
+        const query = `
+            WITH combined_activity AS (
+                -- In-Store Activity
+                SELECT
+                    t.day_of_week, -- Use pre-calculated day
+                    EXTRACT(HOUR FROM t.transaction_time) AS hour_of_day,
+                    t.total_amount AS sales_amount
+                FROM transactions t
+                WHERE
+                    ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'In Store')
+                    AND ($${inStoreIdParamIndex}::varchar IS NULL OR t.store_id = $${inStoreIdParamIndex}::varchar)
+                    AND t.transaction_date >= $${inStoreStartDateParamIndex}::date
+                    AND t.transaction_date < $${inStoreEndDateParamIndex}::date
+
+                UNION ALL
+
+                -- Online Activity
+                SELECT
+                    -- Adjust ISODOW (Mon=1, Sun=7) if needed to match transactions.day_of_week convention
+                    -- Assuming transactions.day_of_week might also be Mon=1, Sun=7 or similar standard.
+                    -- Check DB or data if convention differs!
+                    EXTRACT(ISODOW FROM timezone('Australia/Sydney', TO_TIMESTAMP(bo.ready_at_time))) AS day_of_week,
+                    EXTRACT(HOUR FROM timezone('Australia/Sydney', TO_TIMESTAMP(bo.ready_at_time))) AS hour_of_day,
+                    bo.total_price AS sales_amount
+                FROM bite_orders bo
+                WHERE
+                    ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'Bite')
+                    AND ($${onlineSiteIdParamIndex}::varchar IS NULL OR bo.site_id = $${onlineSiteIdParamIndex}::varchar)
+                    AND bo.ready_at_time BETWEEN EXTRACT(EPOCH FROM $${onlineStartDateParamIndex}::timestamp) AND EXTRACT(EPOCH FROM $${onlineEndDateParamIndex}::timestamp)
+            )
+            SELECT
+                day_of_week::int, -- Ensure integer type
+                hour_of_day::int, -- Ensure integer type
+                COALESCE(SUM(sales_amount), 0)::float AS total_sales,
+                COUNT(*)::int AS order_count
+            FROM combined_activity
+            GROUP BY day_of_week, hour_of_day
+            ORDER BY day_of_week, hour_of_day; -- Order for consistency
+        `;
+
+        console.log('Executing Sales Activity Query:', query.substring(0, 500) + '...');
+        console.log('With params:', params);
+
+        const result = await client.query(query, params);
+        console.log(`Sales Activity Query returned ${result.rows.length} rows.`);
+
+        res.status(200).json(result.rows);
+
+    } catch (err) {
+        console.error('Error fetching sales activity:', err.stack);
+        res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    } finally {
+        if (client) {
+            client.release();
+            console.log('DB client released after sales activity query');
+        }
+    }
+});
+
 // --- Server Start ---
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
