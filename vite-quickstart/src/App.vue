@@ -9,7 +9,7 @@ import ProductOverviewWidget from "./components/dashboard/ProductOverviewWidget.
 
 // Shared state for selected store
 const selectedStore = ref('All');
-const stores = ref(['All', 'Wagga', 'Preston']);
+const stores = ref([ { label: 'All Locations', value: 'All' }, 'Wagga', 'Preston' ]);
 
 // Shared state for dates - replaced startDate and endDate with dateRange
 // Initialize with default: last 7 days

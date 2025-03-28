@@ -1,10 +1,10 @@
 import { updatePrimaryPalette, updateSurfacePalette } from "@primeuix/themes";
-import { computed, ref } from "vue";
+import { computed, ref, onMounted } from "vue";
 
 const appState = ref({
 	primary: "emerald",
 	surface: null,
-	darkMode: false
+	darkMode: true
 });
 
 const primaryColors = ref([
@@ -406,6 +406,12 @@ const surfaces = ref([
 ]);
 
 export function useLayout() {
+	onMounted(() => {
+		if (appState.value.darkMode) {
+			document.documentElement.classList.add("p-dark");
+		}
+	});
+
 	function setPrimary(value) {
 		appState.value.primary = value;
 	}

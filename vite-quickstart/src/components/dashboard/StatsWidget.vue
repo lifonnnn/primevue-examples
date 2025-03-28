@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, watch, watchEffect, computed } from 'vue';
 import { format } from 'date-fns'; // Import date-fns for formatting
+import Chart from 'primevue/chart'; // Import Chart component
 
 // Define props received from App.vue - updated for dateRange
 const props = defineProps({
@@ -35,34 +36,22 @@ const rawOrdersData = ref({
 // Make stats reactive
 const stats = ref([
     {
-        title: "Total Orders",
-        icon: "pi-shopping-cart",
-        value: "Loading...", // Default placeholder -> Set to Loading... initially
-        subtitle: "Fetching...", // Updated subtitle placeholder -> Set to Fetching...
-    },
-    {
-        title: "Active Users",
-        icon: "pi-users",
-        value: "-", // Default placeholder
-         subtitle: "Selected range", // Updated subtitle placeholder
-    },
-    {
         title: "Revenue",
         icon: "pi-dollar",
-        value: "Loading...", // Initial loading state
+        value: "Loading...",
         subtitle: "Fetching...",
     },
     {
-        title: "Success Rate",
-        icon: "pi-chart-line",
-        value: "-", // Default placeholder
-         subtitle: "Selected range", // Updated subtitle placeholder
-    },
-    { // New Card for ATV
         title: "Avg. Transaction Value",
-        icon: "pi-calculator", // Or pi-tag, pi-money-bill
+        icon: "pi-calculator",
         value: "Loading...",
         subtitle: "Calculating...",
+    },
+    {
+        title: "Total Orders",
+        icon: "pi-shopping-cart",
+        value: "Loading...",
+        subtitle: "Fetching...",
     },
 ]);
 
@@ -96,6 +85,83 @@ const getBaseSubtitle = (store, source) => {
     const sourceSubtitle = source === 'All' ? 'All Sources' : source;
     return `${storeSubtitle}, ${sourceSubtitle}`;
 };
+
+// --- Chart Configuration ---
+const chartOptions = ref({
+    responsive: true,
+    maintainAspectRatio: false, // Adjust if needed for sizing within card
+    plugins: {
+        legend: {
+            // Display legend at the bottom, reduce font size if needed
+            position: 'bottom',
+            labels: {
+                usePointStyle: true,
+                 boxWidth: 10, // Smaller legend color box
+                 padding: 10 // Padding around legend items
+            }
+        }
+    },
+     // Adjust cutout percentage for doughnut thickness
+    cutout: '60%'
+});
+
+// Computed property for Revenue Chart Data
+const revenueChartData = computed(() => {
+    const { inStore, online, loading, error } = rawRevenueData.value;
+
+    if (loading || error || typeof inStore !== 'number' || typeof online !== 'number') {
+        // Return null or empty state if data not ready or invalid
+        return null;
+    }
+
+    // Prevent chart rendering if total is zero, or show a specific state?
+    // if (inStore === 0 && online === 0) return null;
+
+    return {
+        labels: ['In-Store', 'Online'],
+        datasets: [
+            {
+                data: [inStore, online],
+                backgroundColor: [
+                    document.documentElement.style.getPropertyValue('--p-cyan-500') || '#06b6d4', // Example colors
+                    document.documentElement.style.getPropertyValue('--p-orange-500') || '#f97316'
+                ],
+                 hoverBackgroundColor: [
+                    document.documentElement.style.getPropertyValue('--p-cyan-400') || '#22d3ee',
+                    document.documentElement.style.getPropertyValue('--p-orange-400') || '#fb923c'
+                 ]
+            }
+        ]
+    };
+});
+
+// Computed property for Orders Chart Data
+const ordersChartData = computed(() => {
+    const { inStore, online, loading, error } = rawOrdersData.value;
+
+     if (loading || error || typeof inStore !== 'number' || typeof online !== 'number') {
+        return null;
+    }
+
+     // if (inStore === 0 && online === 0) return null;
+
+    return {
+        labels: ['In-Store', 'Online'],
+        datasets: [
+            {
+                data: [inStore, online],
+                 backgroundColor: [
+                    document.documentElement.style.getPropertyValue('--p-cyan-500') || '#06b6d4',
+                    document.documentElement.style.getPropertyValue('--p-orange-500') || '#f97316'
+                 ],
+                 hoverBackgroundColor: [
+                    document.documentElement.style.getPropertyValue('--p-cyan-400') || '#22d3ee',
+                    document.documentElement.style.getPropertyValue('--p-orange-400') || '#fb923c'
+                 ]
+            }
+        ]
+    };
+});
 
 // --- Function to fetch total revenue ---
 const fetchTotalRevenue = async (store, range, source) => {
@@ -270,7 +336,45 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
             <div class="stats-content">
                 <div class="stats-value">{{ stat.value }}</div>
                 <div class="stats-subtitle">{{ stat.subtitle }}</div>
+
+                <!-- Add Revenue Chart -->
+                <div v-if="stat.title === 'Revenue' && revenueChartData" class="chart-container mt-4">
+                     <Chart type="doughnut" :data="revenueChartData" :options="chartOptions" class="chart-canvas" />
+                </div>
+                 <!-- Add Loader/Error state for Revenue Chart -->
+                 <div v-else-if="stat.title === 'Revenue' && rawRevenueData.loading" class="chart-container mt-4 text-center">Loading Chart...</div>
+                 <div v-else-if="stat.title === 'Revenue' && rawRevenueData.error" class="chart-container mt-4 text-center text-red-500">Chart Error</div>
+
+                <!-- Add Orders Chart -->
+                 <div v-if="stat.title === 'Total Orders' && ordersChartData" class="chart-container mt-4">
+                     <Chart type="doughnut" :data="ordersChartData" :options="chartOptions" class="chart-canvas" />
+                 </div>
+                 <!-- Add Loader/Error state for Orders Chart -->
+                 <div v-else-if="stat.title === 'Total Orders' && rawOrdersData.loading" class="chart-container mt-4 text-center">Loading Chart...</div>
+                 <div v-else-if="stat.title === 'Total Orders' && rawOrdersData.error" class="chart-container mt-4 text-center text-red-500">Chart Error</div>
+
             </div>
         </div>
     </div>
 </template>
+
+<style scoped>
+/* Add some basic styling for the chart container */
+.chart-container {
+  position: relative;
+  /* Adjust height as needed, make sure it fits well within the card */
+  height: 150px; /* Example height */
+  width: 100%; /* Take full width of the content area */
+}
+
+.chart-canvas {
+  /* Ensure canvas stretches if needed, but maintainAspectRatio might handle this */
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Optional: Adjust layout-card padding if chart feels cramped */
+/* .layout-card {
+  padding-bottom: 1.5rem;
+} */
+</style>
