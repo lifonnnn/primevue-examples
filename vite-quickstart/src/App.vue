@@ -63,26 +63,24 @@ const handleRevenueSourceChange = (newSource) => {
                 :selectedRevenueSource="selectedRevenueSource"
                 class="mb-4"
             />
-            <div class="layout-grid-row mb-4">
-                 <SalesTrendWidget
-                    :selectedStore="selectedStore"
-                    :dateRange="dateRange"
-                    :selectedRevenueSource="selectedRevenueSource"
-                    class="col-8"
-                />
-                <TopProductsWidget
-                    :selectedStore="selectedStore"
-                    :dateRange="dateRange"
-                    :selectedRevenueSource="selectedRevenueSource"
-                    :limit="10"
-                    class="col-4"
-                />
-            </div>
+            <SalesTrendWidget
+                :selectedStore="selectedStore"
+                :dateRange="dateRange"
+                :selectedRevenueSource="selectedRevenueSource"
+                class="mb-4"
+            />
+            <TopProductsWidget
+                :selectedStore="selectedStore"
+                :dateRange="dateRange"
+                :selectedRevenueSource="selectedRevenueSource"
+                :limit="10"
+                class="mb-4"
+            />
             <PeakTimeWidget
                 :selectedStore="selectedStore"
                 :dateRange="dateRange"
                 :selectedRevenueSource="selectedRevenueSource"
-                class="mb-4 col-12"
+                class="mb-4"
             />
         </div>
         <AppFooter />

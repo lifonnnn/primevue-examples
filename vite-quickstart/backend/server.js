@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const path = require('path');
+const fetch = require('node-fetch');
 
 // Load environment variables from the root .env file
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -36,6 +37,11 @@ app.use(cors({ origin: FRONTEND_URL }));
 
 // Basic Middleware
 app.use(express.json()); // for parsing application/json
+
+// --- In-Memory Cache for Products ---
+let productMapCache = {};
+let lastProductFetchTime = 0;
+const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour cache
 
 // --- API Endpoints ---
 
@@ -705,6 +711,92 @@ app.get('/api/sales-activity', async (req, res) => {
             client.release();
             console.log('DB client released after sales activity query');
         }
+    }
+});
+
+// --- API Endpoint: Get Product Map ---
+app.get('/api/products', async (req, res) => {
+    const now = Date.now();
+    console.log('GET /api/products requested.');
+
+    // Check cache validity
+    if (now - lastProductFetchTime < CACHE_DURATION_MS && Object.keys(productMapCache).length > 0) {
+        console.log('Returning cached product map.');
+        return res.json(productMapCache);
+    }
+
+    console.log('Cache stale or empty. Fetching products from Epos Now API...');
+    // Use the Preston API key first. Adjust if needed.
+    const apiKey = process.env.PRESTON_API_KEY;
+    if (!apiKey) {
+         console.error('Epos Now API Key (PRESTON_API_KEY) not found in .env');
+         // Avoid sending detailed error to client, log it server-side
+         return res.status(500).json({ error: 'Server configuration error.' });
+    }
+
+    const apiUrl = 'https://api.eposnowhq.com/api/v4/Product';
+    const options = {
+        method: 'GET',
+        headers: {
+            // Assuming the key is already Base64 encoded or needs to be used as a Bearer token.
+            // Using Basic Auth format based on the typical structure of such keys.
+            // Adjust if Epos Now uses a different scheme (e.g., Bearer Token).
+            'Authorization': `Basic ${apiKey}`,
+            'Content-Type': 'application/json'
+        }
+    };
+
+    try {
+        const response = await fetch(apiUrl, options);
+        console.log(`Epos Now API Response Status: ${response.status} ${response.statusText}`);
+
+        if (!response.ok) {
+            let errorBody = 'Could not read error body';
+            try {
+                 // Try reading the body for more detailed error info from Epos
+                 errorBody = await response.text();
+                 console.error(`Epos Now API Error Body: ${errorBody}`);
+            } catch (e) { console.error('Failed to read Epos Now error body', e); }
+            // Throw an error to be caught by the catch block
+            throw new Error(`Failed to fetch products from Epos Now API. Status: ${response.status}`);
+        }
+
+        const products = await response.json(); // Expecting an array of product objects
+        console.log(`Fetched ${Array.isArray(products) ? products.length : 'invalid data'} products from Epos Now.`);
+
+        // --- DEBUG LOG: Log the first product object --- 
+        if (Array.isArray(products) && products.length > 0) {
+            console.log('First raw product object from Epos:', JSON.stringify(products[0], null, 2));
+        }
+        // --- END DEBUG LOG ---
+
+        // Transform into ID-to-Name map
+        const newProductMap = {};
+        if (Array.isArray(products)) {
+            products.forEach(product => {
+                // Use product.Id (uppercase I) and product.Name (uppercase N)
+                 if (product && typeof product.Id !== 'undefined' && typeof product.Name === 'string') {
+                     newProductMap[product.Id.toString()] = product.Name;
+                 } else {
+                      // Log if the structure is unexpected
+                      console.warn('Skipping product due to missing/invalid id or Name:', product);
+                 }
+            });
+        } else {
+             console.error('Epos Now API response was not an array:', products);
+             throw new Error('Unexpected response format from Epos Now API.');
+        }
+
+        // Update cache
+        productMapCache = newProductMap;
+        lastProductFetchTime = now;
+        console.log(`Product map cache updated with ${Object.keys(productMapCache).length} entries.`);
+
+        res.json(productMapCache);
+
+    } catch (error) {
+        console.error('Error in /api/products endpoint:', error);
+        res.status(500).json({ error: 'Failed to retrieve product data', details: error.message });
     }
 });
 

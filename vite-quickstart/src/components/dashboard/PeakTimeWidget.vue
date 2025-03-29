@@ -290,9 +290,10 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
 
 <style scoped>
 .widget-peak-time {
-     min-height: 450px; /* Increased min-height */
+     min-height: 550px; /* Increased min height */
      display: flex;
      flex-direction: column;
+     width: 100%; /* Explicitly set width to 100% */
 }
 
 .widget-header {
@@ -315,7 +316,7 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource],
 
 .chart-container {
   position: relative;
-  height: 400px; /* Increased height */
+  height: 500px; /* Increased height */
   width: 100%;
 }
 

@@ -23,14 +23,17 @@ const props = defineProps({
 
 // --- State ---
 const topProductsData = ref([]);
-const loading = ref(true);
+const productNameMap = ref({}); // <-- Add state for product name map
+const loading = ref(true); // Combined loading state (initially true)
+const loadingProducts = ref(true); // Specific loading state for products fetch
+const loadingNames = ref(true);    // Specific loading state for names fetch
 const error = ref(false);
 const errorMessage = ref('');
 
 // --- Define Columns Dynamically ---
 const columns = ref([
     // { field: 'rank', header: '#', style: 'width: 3rem' }, // REMOVED RANK
-    { field: 'product_identifier', header: 'Product' },
+    { field: 'product_identifier', header: 'Product' }, // We'll use a template for this
     { field: 'final_quantity', header: 'Qty Sold', style: 'width: 6rem' },
     { field: 'final_revenue', header: 'Total Revenue', style: 'width: 10rem' }
 ]);
@@ -46,7 +49,7 @@ const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(value);
 };
 
-// --- Fetching Logic ---
+// --- Fetching Logic for Top Products Sales Data ---
 const fetchTopProducts = async (store, range, source, limit) => {
     if (!isRangeValid(range)) {
         console.error("TopProductsWidget: Invalid date range provided.", range);
@@ -57,8 +60,8 @@ const fetchTopProducts = async (store, range, source, limit) => {
         return;
     }
 
-    loading.value = true;
-    error.value = false;
+    loadingProducts.value = true; // Set specific loading state
+    error.value = false; // Reset common error state
     errorMessage.value = '';
     topProductsData.value = []; // Clear previous results
 
@@ -67,7 +70,7 @@ const fetchTopProducts = async (store, range, source, limit) => {
 
     try {
         const apiUrl = `http://localhost:3001/api/top-products?store=${encodeURIComponent(store)}&startDate=${startDateFormatted}&endDate=${endDateFormatted}&source=${encodeURIComponent(source)}&limit=${limit}`;
-        console.log('TopProductsWidget: Fetching data from:', apiUrl);
+        console.log('TopProductsWidget: Fetching sales data from:', apiUrl);
         const response = await fetch(apiUrl);
 
         if (!response.ok) {
@@ -76,29 +79,73 @@ const fetchTopProducts = async (store, range, source, limit) => {
         }
 
         const data = await response.json();
-        // SIMPLIFIED UPDATE: Assign raw data directly
         topProductsData.value = data;
-        console.log(`TopProductsWidget: Received ${data.length} products.`);
+        console.log(`TopProductsWidget: Received ${data.length} product sales stats.`);
 
     } catch (err) {
-        console.error("TopProductsWidget: Failed to fetch top products:", err);
+        console.error("TopProductsWidget: Failed to fetch top products sales:", err);
         error.value = true;
-        errorMessage.value = err.message || 'Failed to load products.';
+        errorMessage.value = err.message || 'Failed to load product sales.';
         topProductsData.value = []; // Clear data on error
     } finally {
-        loading.value = false;
+        loadingProducts.value = false; // Clear specific loading state
+        // Update combined loading state
+        loading.value = loadingProducts.value || loadingNames.value;
+    }
+};
+
+// --- Fetching Logic for Product Names Map ---
+const fetchProductNames = async () => {
+    loadingNames.value = true;
+    error.value = false; // Reset common error state (might be overwritten by other fetch)
+
+    try {
+        const apiUrl = `http://localhost:3001/api/products`;
+        console.log('TopProductsWidget: Fetching product names map from:', apiUrl);
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) {
+             const errorData = await response.json().catch(() => ({ message: 'Unknown error fetching product names' }));
+             throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || errorData.error || 'Unknown error'}`);
+        }
+
+        productNameMap.value = await response.json(); // Expecting { "id": "Name", ... }
+        console.log(`TopProductsWidget: Received product name map with ${Object.keys(productNameMap.value).length} entries.`);
+
+    } catch (err) {
+        console.error("TopProductsWidget: Failed to fetch product names map:", err);
+        // Set error state, but maybe don't clear sales data?
+        error.value = true;
+        errorMessage.value = err.message || 'Failed to load product names.';
+        productNameMap.value = {}; // Clear map on error
+    } finally {
+        loadingNames.value = false;
+        // Update combined loading state
+        loading.value = loadingProducts.value || loadingNames.value;
     }
 };
 
 // --- Lifecycle and Watchers ---
 onMounted(() => {
+    loading.value = true; // Set combined loading true initially
     fetchTopProducts(props.selectedStore, props.dateRange, props.selectedRevenueSource, props.limit);
+    fetchProductNames(); // Fetch names map on mount
 });
 
-watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, props.limit], ([newStore, newRange, newSource, newLimit]) => {
-    console.log('TopProductsWidget: Props changed, refetching data...');
+watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, props.limit], ([newStore, newRange, newSource, newLimit], [oldStore, oldRange, oldSource, oldLimit]) => {
+    console.log('TopProductsWidget: Props changed, refetching sales data...');
+    loading.value = true; // Set combined loading
     fetchTopProducts(newStore, newRange, newSource, newLimit);
-}, { deep: true }); // Use deep watch for the dateRange array
+    // Optionally refetch names if needed, though usually less frequent
+    // if (some_condition_to_refetch_names) { fetchProductNames(); }
+    // If names rarely change, fetching only on mount might be sufficient.
+    // If store changes might imply different product sets, refetch names:
+    if (newStore !== oldStore) {
+        console.log('TopProductsWidget: Store changed, refetching product names...');
+        fetchProductNames();
+    }
+
+}, { deep: true });
 
 </script>
 
@@ -109,7 +156,7 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, 
         </div>
         <div class="widget-content">
             <div v-if="loading" class="loading-indicator">
-                Loading top products...
+                Loading product data...
             </div>
             <div v-else-if="error" class="error-message">
                 Error: {{ errorMessage }}
@@ -128,9 +175,18 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, 
                         :field="col.field"
                         :header="col.header"
                         :style="col.style">
-                        <template v-if="col.field === 'final_revenue'" #body="{ data }">
+                         <!-- Template for Product Name Lookup -->
+                         <template v-if="col.field === 'product_identifier'" #body="{ data }">
+                             {{ productNameMap[data.product_identifier] || `ID: ${data.product_identifier}` }}
+                        </template>
+                        <!-- Template for Currency Formatting -->
+                        <template v-else-if="col.field === 'final_revenue'" #body="{ data }">
                              {{ formatCurrency(data[col.field]) }}
                         </template>
+                         <!-- Default slot for other columns (like quantity) -->
+                         <!-- <template v-else #body="{ data }">
+                            {{ data[col.field] }}
+                         </template> -->
                     </Column>
                 </DataTable>
             </div>
@@ -144,7 +200,8 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, 
 .widget-top-products {
     display: flex;
     flex-direction: column;
-    /* Consider setting a min-height or height if needed */
+    min-height: 550px; /* Increased minimum height */
+    width: 100%; /* Explicitly set width to 100% */
 }
 
 .widget-header {
@@ -162,23 +219,32 @@ watch(() => [props.selectedStore, props.dateRange, props.selectedRevenueSource, 
 
 
 .widget-content {
-    flex-grow: 1; /* Allow content to fill space */
-    position: relative; /* For loading/error states */
-     overflow: hidden; /* Prevent content overflow */
+    flex-grow: 1; /* Allow content to fill available space */
+    position: relative;
+    overflow: auto; /* Change from hidden to auto to allow scrolling if content exceeds min-height */
+    display: flex; /* Use flex to make child container grow */
+    flex-direction: column;
 }
 
 .products-table-container {
-     overflow-x: auto; /* Allow horizontal scroll if needed on small screens */
+     flex-grow: 1; /* Allow table container to grow */
+     overflow: auto; /* Allow scrolling within the container */
+     /* width: 100%; Ensure it takes full width of parent */
 }
 
-/* Make table text slightly larger (adjust as needed) */
+.products-table.p-datatable-sm {
+    /* Ensure table itself can grow vertically if needed, though DataTable might handle this */
+    height: 100%; /* Try making table take full height of container */
+}
+
+/* Font size styles remain as they were */
 .products-table.p-datatable-sm .p-datatable-tbody > tr > td {
-    padding: 0.6rem 0.8rem; /* Slightly increase padding too */
-     font-size: 1rem; /* Increased font size */
+    padding: 0.7rem 0.9rem;
+     font-size: 1.05rem;
 }
 .products-table.p-datatable-sm .p-datatable-thead > tr > th {
-     padding: 0.6rem 0.8rem; /* Match padding */
-     font-size: 1rem; /* Increased font size */
+     padding: 0.7rem 0.9rem;
+     font-size: 1.05rem;
 }
 
 .loading-indicator,
