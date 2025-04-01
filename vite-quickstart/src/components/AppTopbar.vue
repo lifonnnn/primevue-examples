@@ -191,4 +191,60 @@ const onDateRangeChange = (newRange) => {
     width: 100%;
 }
 
+/* Add Media Query for mobile responsiveness */
+@media (max-width: 768px) { /* Adjust breakpoint as needed */
+  .topbar-container {
+    flex-direction: column; /* Stack brand and actions vertically */
+    align-items: stretch; /* Make items stretch full width */
+  }
+
+  .topbar-brand {
+     margin-bottom: 1rem; /* Add space below brand */
+     justify-content: center; /* Center brand elements */
+   }
+
+  .topbar-actions {
+    flex-direction: column; /* Stack action items vertically */
+    align-items: stretch; /* Make action items stretch full width */
+    gap: 1rem; /* Adjust vertical gap */
+    width: 100%; /* Ensure actions container takes full width */
+  }
+
+  /* Ensure wrappers inside actions also allow content to stretch */
+  .topbar-actions > div {
+     width: 100%;
+     display: flex; /* Keep flex for internal alignment if needed */
+     justify-content: center; /* Center items like buttons */
+   }
+
+  /* Adjust width overrides for mobile if needed */
+  .topbar-actions .md\:w-64,
+  .topbar-actions .md\:w-164, /* Might need a different class if w-164 is used */
+  .topbar-actions .md\:w-56 {
+     width: 100% !important; /* Override desktop widths */
+   }
+
+  /* Ensure Calendar also takes full width */
+  .topbar-actions .p-calendar {
+     width: 100%;
+   }
+
+   /* Center the date range label and calendar */
+   .topbar-actions > div:has(.p-calendar) {
+     flex-direction: column; /* Stack label and calendar */
+     align-items: stretch;
+     gap: 0.5rem;
+   }
+
+  .topbar-actions > div > span.mr-2 {
+      margin-right: 0; /* Remove right margin */
+      text-align: center; /* Center the 'Date Range:' text */
+   }
+
+   /* Adjust buttons container if needed */
+   .topbar-actions > div:has(.topbar-theme-button) {
+       justify-content: center; /* Center theme/settings buttons */
+       gap: 1rem;
+   }
+}
 </style>
