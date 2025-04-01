@@ -44,43 +44,87 @@ let productDetailsMap = {}; // Map: Product ID (string) -> { name, salePrice, co
 
 // Function to load product details from JSON
 async function loadProductDetails() {
-    const jsonPath = path.join(__dirname, 'all_products.json');
-    console.log(`Attempting to load product details from: ${jsonPath}`);
-    try {
-        const data = await fs.readFile(jsonPath, 'utf8');
-        const products = JSON.parse(data);
+    const waggaJsonPath = path.join(__dirname, 'wagga_products.json');
+    const prestonJsonPath = path.join(__dirname, 'preston_products.json');
+    const tempMap = {};
+    let totalLoadedCount = 0;
+    let errorsOccurred = false;
 
+    console.log(`Attempting to load product details from Wagga and Preston JSON files...`);
+
+    // Helper function to process products from a file
+    const processProducts = (products, filePath) => {
         if (!Array.isArray(products)) {
-            throw new Error('all_products.json does not contain a valid JSON array.');
+            throw new Error(`${path.basename(filePath)} does not contain a valid JSON array.`);
         }
-
-        const tempMap = {};
         let loadedCount = 0;
         products.forEach(product => {
-            // Validate essential fields
             if (product && typeof product.Id !== 'undefined' && product.Name && typeof product.SalePrice === 'number' && typeof product.CostPrice === 'number') {
-                tempMap[product.Id.toString()] = {
-                    name: product.Name,
-                    salePrice: product.SalePrice,
-                    costPrice: product.CostPrice
-                };
-                loadedCount++;
+                // Only add if not already present (avoid potential duplicates if IDs overlap - unlikely but safe)
+                if (!tempMap[product.Id.toString()]) {
+                     tempMap[product.Id.toString()] = {
+                         name: product.Name,
+                         salePrice: product.SalePrice,
+                         costPrice: product.CostPrice
+                     };
+                     loadedCount++;
+                 } else {
+                    // Optionally log if a duplicate ID is found across files
+                    // console.warn(`Duplicate Product ID ${product.Id} found. Keeping first entry loaded.`);
+                 }
             } else {
-                console.warn('Skipping product due to missing/invalid Id, Name, SalePrice, or CostPrice:', product);
+                console.warn(`Skipping product in ${path.basename(filePath)} due to missing/invalid Id, Name, SalePrice, or CostPrice:`, product?.Id || 'N/A');
             }
         });
-        productDetailsMap = tempMap; // Atomically update the map
-        console.log(`Successfully loaded ${loadedCount} product details into memory.`);
+        console.log(`Successfully processed ${loadedCount} product details from ${path.basename(filePath)}.`);
+        return loadedCount;
+    };
 
+    // Try loading Wagga products
+    try {
+        console.log(`Loading Wagga products from: ${waggaJsonPath}`);
+        const waggaData = await fs.readFile(waggaJsonPath, 'utf8');
+        const waggaProducts = JSON.parse(waggaData);
+        totalLoadedCount += processProducts(waggaProducts, waggaJsonPath);
     } catch (error) {
-        console.error('------------------------------------------------------------');
-        console.error('*** CRITICAL ERROR: Failed to load all_products.json! ***');
-        console.error(`*** File Path: ${jsonPath} ***`);
+        console.error(`------------------------------------------------------------`);
+        console.error(`*** ERROR: Failed to load ${path.basename(waggaJsonPath)}! ***`);
+        console.error(`*** File Path: ${waggaJsonPath} ***`);
         console.error('*** Error: ', error.message);
-        console.error('*** The /api/top-products endpoint might not show correct product names/prices. ***');
-        console.error('------------------------------------------------------------');
-        // Keep the server running, but the map will be empty.
-        productDetailsMap = {};
+        console.error(`------------------------------------------------------------`);
+        errorsOccurred = true;
+    }
+
+    // Try loading Preston products
+    try {
+        console.log(`Loading Preston products from: ${prestonJsonPath}`);
+        const prestonData = await fs.readFile(prestonJsonPath, 'utf8');
+        const prestonProducts = JSON.parse(prestonData);
+        totalLoadedCount += processProducts(prestonProducts, prestonJsonPath);
+    } catch (error) {
+        console.error(`------------------------------------------------------------`);
+        console.error(`*** ERROR: Failed to load ${path.basename(prestonJsonPath)}! ***`);
+        console.error(`*** File Path: ${prestonJsonPath} ***`);
+        console.error('*** Error: ', error.message);
+        console.error(`------------------------------------------------------------`);
+        errorsOccurred = true;
+    }
+
+    // Final update and logging
+    productDetailsMap = tempMap; // Atomically update the map with combined data
+
+    if (totalLoadedCount > 0) {
+         console.log(`Successfully loaded a total of ${totalLoadedCount} product details into memory from Wagga and Preston files.`);
+         if (errorsOccurred) {
+             console.warn('*** Note: Errors occurred while loading one or more product files. Product lookup might be incomplete. ***');
+         }
+    } else {
+         console.error('------------------------------------------------------------');
+         console.error('*** CRITICAL ERROR: Failed to load any product details from JSON files! ***');
+         console.error('*** The /api/top-products endpoint will likely show "Unknown Product" for all in-store items. ***');
+         console.error('------------------------------------------------------------');
+         // Keep the server running, but the map will be empty.
+         productDetailsMap = {}; // Ensure map is empty if nothing loaded
     }
 }
 
@@ -436,10 +480,10 @@ app.get('/api/sales-trend', async (req, res) => {
                 SELECT
                     transaction_date::date AS sale_date, -- Use original date
                     SUM(total_amount) as daily_revenue
-                FROM transactions
+                FROM transactions t
                 WHERE
                     ($${inStoreSourceCheck1ParamIndex} = 'All' OR $${inStoreSourceCheck2ParamIndex} = 'In Store')
-                    AND ($${inStoreIdParamIndex}::varchar IS NULL OR store_id = $${inStoreIdParamIndex}::varchar)
+                    AND ($${inStoreIdParamIndex}::varchar IS NULL OR t.store_id = $${inStoreIdParamIndex}::varchar)
                     AND transaction_date >= $${inStoreStartDateParamIndex}::date -- Use original start date
                     AND transaction_date <= $${inStoreEndDateParamIndex}::date -- Use original end date (inclusive)
                 GROUP BY transaction_date -- Group by stored date
@@ -450,10 +494,10 @@ app.get('/api/sales-trend', async (req, res) => {
                 SELECT 
                     (timezone('Australia/Sydney', TO_TIMESTAMP(ready_at_time)))::date AS sale_date,
                     SUM(total_price) as daily_revenue
-                FROM bite_orders
+                FROM bite_orders bo
                 WHERE
                     ($${onlineSourceCheck1ParamIndex} = 'All' OR $${onlineSourceCheck2ParamIndex} = 'Bite')
-                    AND ($${onlineSiteIdParamIndex}::varchar IS NULL OR site_id = $${onlineSiteIdParamIndex}::varchar)
+                    AND ($${onlineSiteIdParamIndex}::varchar IS NULL OR bo.site_id = $${onlineSiteIdParamIndex}::varchar)
                     AND ready_at_time BETWEEN EXTRACT(EPOCH FROM $${onlineStartDateParamIndex}::timestamp) AND EXTRACT(EPOCH FROM $${onlineEndDateParamIndex}::timestamp)
                 GROUP BY (timezone('Australia/Sydney', TO_TIMESTAMP(ready_at_time)))::date
             )
@@ -548,6 +592,7 @@ app.get('/api/top-products', async (req, res) => {
             WITH instore_products AS (
                 SELECT
                     ti.product_id::text AS product_identifier,
+                    t.store_id AS specific_store_id, -- Include store_id from transactions
                     'In-Store' AS source_type,
                     SUM(ti.quantity) AS total_quantity,
                     SUM(ti.unit_price * ti.quantity) AS total_revenue
@@ -560,7 +605,7 @@ app.get('/api/top-products', async (req, res) => {
                     AND t.transaction_date >= $${inStoreStartDateParamIndex}::date -- Use original start date
                     AND t.transaction_date <= $${inStoreEndDateParamIndex}::date -- Use original end date (inclusive)
                     AND ti.quantity > 0 -- Exclude items with zero quantity
-                GROUP BY ti.product_id
+                GROUP BY ti.product_id, t.store_id
             ),
             online_products AS (
                  SELECT
@@ -580,9 +625,10 @@ app.get('/api/top-products', async (req, res) => {
                  GROUP BY boi.name
              )
             -- Combine results from both sources
-            SELECT product_identifier, source_type, total_quantity, total_revenue FROM instore_products
+            SELECT product_identifier, specific_store_id, source_type, total_quantity, total_revenue FROM instore_products
             UNION ALL
-            SELECT product_identifier, source_type, total_quantity, total_revenue FROM online_products;
+            -- Add NULL for specific_store_id for online products
+            SELECT product_identifier, NULL AS specific_store_id, source_type, total_quantity, total_revenue FROM online_products;
         `;
 
         console.log('Executing Revised Top Products Query:', query.substring(0, 500) + '...');
@@ -606,6 +652,7 @@ app.get('/api/top-products', async (req, res) => {
             let name = null;
             let salePrice = null;
             let costPrice = null;
+            let storeName = null; // Initialize storeName
 
             if (product.source_type === 'In-Store') {
                 const details = productDetailsMap[product.product_identifier]; // product_identifier is the ID string
@@ -613,10 +660,18 @@ app.get('/api/top-products', async (req, res) => {
                     name = details.name;
                     salePrice = details.salePrice;
                     costPrice = details.costPrice;
+                    // Map specific_store_id ('wagga' or 'preston') to a user-friendly name
+                    if (product.specific_store_id === 'wagga') {
+                        storeName = 'Wagga';
+                    } else if (product.specific_store_id === 'preston') {
+                        storeName = 'Preston';
+                    } else {
+                        storeName = product.specific_store_id; // Fallback to the ID if not matched
+                    }
                 } else {
                     // Handle case where product ID from transaction is not in all_products.json
                     name = `Unknown Product [${product.product_identifier}]`;
-                    console.warn(`Product ID ${product.product_identifier} not found in productDetailsMap.`);
+                    console.warn(`Product ID ${product.product_identifier} (Store: ${product.specific_store_id}) not found in productDetailsMap.`);
                 }
             } else if (product.source_type === 'Online') {
                 // For online, the identifier is already the name
@@ -630,6 +685,7 @@ app.get('/api/top-products', async (req, res) => {
             return {
                 name: name,
                 source: product.source_type,
+                storeName: storeName, // Add storeName to the response (will be null for Online)
                 revenue: parseFloat(product.total_revenue || 0), // Ensure float
                 salePrice: salePrice, // Will be null for Online or if not found
                 costPrice: costPrice, // Will be null for Online or if not found

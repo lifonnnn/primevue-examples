@@ -130,6 +130,7 @@ watch(() => [props.selectedStore, dateRangeKey.value, props.selectedRevenueSourc
                         <tr>
                             <th>Product Name</th>
                             <th>Source</th>
+                            <th>Store</th>
                             <th>Qty Sold</th>
                             <th>Total Revenue</th>
                             <th>Sale Price</th>
@@ -137,9 +138,17 @@ watch(() => [props.selectedStore, dateRangeKey.value, props.selectedRevenueSourc
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="(product, index) in topProductsData" :key="index">
+                        <tr 
+                            v-for="(product, index) in topProductsData" 
+                            :key="index"
+                            :class="{
+                                'row-wagga': product.storeName === 'Wagga',
+                                'row-preston': product.storeName === 'Preston'
+                            }"
+                        >
                             <td>{{ product.name }}</td>
                             <td>{{ product.source }}</td>
+                            <td>{{ product.storeName || '-' }}</td>
                             <td class="text-right">{{ product.quantity }}</td>
                             <td class="text-right">{{ formatCurrency(product.revenue) }}</td>
                             <td class="text-right">{{ formatCurrency(product.salePrice) }}</td>
@@ -249,6 +258,9 @@ watch(() => [props.selectedStore, dateRangeKey.value, props.selectedRevenueSourc
     flex-grow: 1; /* Allow wrapper to grow and fill space */
     height: 0; /* Added to help flexbox determine scroll height within fixed parent */
     /* max-height: 100%; /* Let flexbox handle height */
+    border: 1px solid var(--p-surface-border); /* Add border for scroll indication */
+    border-radius: var(--p-border-radius); /* Optional: match card border radius */
+    padding: 0.25rem; /* Small padding so border doesn't touch table directly */
 }
 
 .simple-table {
@@ -272,7 +284,7 @@ watch(() => [props.selectedStore, dateRangeKey.value, props.selectedRevenueSourc
 }
 
 .simple-table th {
-    background-color: var(--p-surface-ground); /* CHANGED to ground (more opaque?) */
+    background-color: var(--p-surface-section); /* Use surface-section like other headers */
     font-weight: 600;
     position: sticky; /* Keep header sticky during vertical scroll */
     top: 0;
@@ -288,8 +300,14 @@ watch(() => [props.selectedStore, dateRangeKey.value, props.selectedRevenueSourc
     border-bottom: none; /* Remove border from the very last row */
 }
 
-.simple-table tbody tr:nth-child(even) {
-    background-color: var(--p-surface-ground); /* Optional: alternating row color */
+.simple-table tbody tr.row-wagga {
+    /* Slightly different background for Wagga - subtle */
+    background-color: var(--p-surface-100); /* Example: a slightly darker/different shade */
+}
+
+.simple-table tbody tr.row-preston {
+    /* Slightly different background for Preston - subtle */
+    background-color: var(--p-surface-50); /* Example: a slightly lighter/different shade */
 }
 
 .simple-table tbody tr:hover {
