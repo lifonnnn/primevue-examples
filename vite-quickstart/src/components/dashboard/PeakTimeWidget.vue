@@ -60,7 +60,7 @@ const fetchSalesActivity = async (store, range, source) => {
     const endDateFormatted = format(range[1], 'yyyy-MM-dd');
 
     try {
-        const apiUrl = `http://localhost:3001/api/sales-activity?store=${encodeURIComponent(store)}&startDate=${startDateFormatted}&endDate=${endDateFormatted}&source=${encodeURIComponent(source)}`;
+        const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/api/sales-activity?store=${encodeURIComponent(store)}&startDate=${startDateFormatted}&endDate=${endDateFormatted}&source=${encodeURIComponent(source)}`;
         console.log('PeakTimeWidget: Fetching data from:', apiUrl);
         const response = await fetch(apiUrl);
 

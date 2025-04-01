@@ -59,7 +59,7 @@ const fetchTopProducts = async (store, range, source, limit) => {
 
     try {
         // Use the limit prop in the API call
-        const apiUrl = `http://localhost:3001/api/top-products?store=${encodeURIComponent(store)}&startDate=${startDateFormatted}&endDate=${endDateFormatted}&source=${encodeURIComponent(source)}&limit=${limit}`;
+        const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/api/top-products?store=${encodeURIComponent(store)}&startDate=${startDateFormatted}&endDate=${endDateFormatted}&source=${encodeURIComponent(source)}&limit=${limit}`;
         console.log('TopProductsWidget: Fetching top products from:', apiUrl);
         const response = await fetch(apiUrl);
 
