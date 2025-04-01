@@ -37,12 +37,25 @@ This file documents the recent changes and features implemented in the dashboard
 *   Renamed `src/components/dashboard/ProductOverviewWidget.vue` to `src/components/dashboard/TopProductsWidget.vue`.
 *   Adjusted layout in `src/App.vue` to place `SalesTrendWidget` and `TopProductsWidget` side-by-side in a row.
 *   Added vertical spacing between dashboard widgets in `src/App.vue` using margins.
+*   Adjusted layout in `src/App.vue` to stack `TopProductsWidget`, `SalesTrendWidget`, and `PeakTimeWidget` vertically, spanning the full width of the main content area. Increased the minimum height of these widgets for better data presentation.
 
 ### Fixed
 
 *   Resolved discrepancy where the revenue widget initially showed all-time revenue instead of the default last 7 days, by implementing backend date filtering.
 *   Corrected SQL syntax error in the backend `/api/total-revenue` endpoint related to parameter casting for timestamp comparisons (`EXTRACT(EPOCH FROM $1::timestamp)`).
-*   Resolved "Maximum recursive updates exceeded" error in `TopProductsWidget` by simplifying `DataTable` configuration and data handling.
+*   Resolved "Maximum recursive updates exceeded" error in `TopProductsWidget` by simplifying `DataTable` configuration and data handling. **Note:** This error reappeared after backend changes to load product details from JSON and preprocess data (`/api/top-products` returning `name`, `salePrice`, `costPrice`, etc.). Attempts to fix the new instance included:
+    *   Removing `scrollHeight="flex"` from `<DataTable>`.
+    *   Removing fixed height and deep scroll styles from the component.
+    *   Removing the `scrollable` prop from `<DataTable>`.
+    *   Changing `columns` definition from `ref` to `const`.
+    *   Refactoring column body rendering from conditional templates to a single template with internal conditions.
+    *   Changing the watcher from `deep: true` on `props.dateRange` to watching a computed primitive key (`dateRangeKey`).
+    *   Changing from dynamic column generation (`v-for`) to static `<Column>` definitions.
 *   Fixed backend SQL parameter error ("could not determine data type") in `/api/top-products` by correctly matching query parameters.
 *   Corrected initial date validation failure in `/api/top-products`.
-*   Fixed Vite build error by removing unused `ProductOverviewWidget` import/usage. 
+*   Fixed Vite build error by removing unused `ProductOverviewWidget` import/usage.
+*   Fixed date handling discrepancy in backend queries where order counts were off by one day due to incorrect date range handling:
+    *   Removed `addDays` helper function and date adjustment logic from all backend API endpoints
+    *   Updated SQL queries to use inclusive date ranges (`>= startDate AND <= endDate`) for `transaction_date` fields
+    *   Affected endpoints: `/api/total-revenue`, `/api/total-orders`, `/api/sales-trend`, `/api/top-products`, `/api/sales-activity`
+    *   This ensures that order counts match the EposNow system's data for specific dates 

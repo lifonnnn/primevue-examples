@@ -6,6 +6,7 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const path = require('path');
 const fetch = require('node-fetch');
+const fs = require('fs').promises; // <-- Import fs.promises
 
 // Load environment variables from the root .env file
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -38,10 +39,50 @@ app.use(cors({ origin: FRONTEND_URL }));
 // Basic Middleware
 app.use(express.json()); // for parsing application/json
 
-// --- In-Memory Cache for Products ---
-let productMapCache = {};
-let lastProductFetchTime = 0;
-const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour cache
+// --- In-Memory Store for Product Details (from JSON) ---
+let productDetailsMap = {}; // Map: Product ID (string) -> { name, salePrice, costPrice }
+
+// Function to load product details from JSON
+async function loadProductDetails() {
+    const jsonPath = path.join(__dirname, 'all_products.json');
+    console.log(`Attempting to load product details from: ${jsonPath}`);
+    try {
+        const data = await fs.readFile(jsonPath, 'utf8');
+        const products = JSON.parse(data);
+
+        if (!Array.isArray(products)) {
+            throw new Error('all_products.json does not contain a valid JSON array.');
+        }
+
+        const tempMap = {};
+        let loadedCount = 0;
+        products.forEach(product => {
+            // Validate essential fields
+            if (product && typeof product.Id !== 'undefined' && product.Name && typeof product.SalePrice === 'number' && typeof product.CostPrice === 'number') {
+                tempMap[product.Id.toString()] = {
+                    name: product.Name,
+                    salePrice: product.SalePrice,
+                    costPrice: product.CostPrice
+                };
+                loadedCount++;
+            } else {
+                console.warn('Skipping product due to missing/invalid Id, Name, SalePrice, or CostPrice:', product);
+            }
+        });
+        productDetailsMap = tempMap; // Atomically update the map
+        console.log(`Successfully loaded ${loadedCount} product details into memory.`);
+
+    } catch (error) {
+        console.error('------------------------------------------------------------');
+        console.error('*** CRITICAL ERROR: Failed to load all_products.json! ***');
+        console.error(`*** File Path: ${jsonPath} ***`);
+        console.error('*** Error: ', error.message);
+        console.error('*** The /api/top-products endpoint might not show correct product names/prices. ***');
+        console.error('------------------------------------------------------------');
+        // Keep the server running, but the map will be empty.
+        productDetailsMap = {};
+    }
+}
 
 // --- API Endpoints ---
 
@@ -85,18 +126,15 @@ app.get('/api/total-revenue', async (req, res) => {
         const inStoreConditions = [];
         let inStoreParamIndex = 1;
 
-        // Add date condition for in-store, APPLYING the +1 day workaround
+        // Add date condition for in-store, REMOVING the +1 day workaround
         if (areDatesValid) {
-            const adjustedStartDate = addDays(startDate, 1); // Add 1 day to start date
-            const adjustedEndDateExclusive = addDays(endDate, 2); // Add 2 days to end date (making it exclusive < end+1+1)
-
-            // Use >= start+1 AND < end+1+1 as per README
+            // REMOVED adjustedStartDate and adjustedEndDateExclusive
+            // Use >= startDate AND <= endDate for inclusive range
             inStoreConditions.push(`transaction_date >= $${inStoreParamIndex++}`);
-            inStoreParams.push(adjustedStartDate);
-            inStoreConditions.push(`transaction_date < $${inStoreParamIndex++}`);
-            inStoreParams.push(adjustedEndDateExclusive);
-            // Removed time conditions as date workaround should handle the range
-            console.log(`Adjusted In-Store Date Range for Revenue: >= ${adjustedStartDate} AND < ${adjustedEndDateExclusive}`);
+            inStoreParams.push(startDate); // Use original startDate
+            inStoreConditions.push(`transaction_date <= $${inStoreParamIndex++}`);
+            inStoreParams.push(endDate); // Use original endDate
+            console.log(`Using In-Store Date Range for Revenue: >= ${startDate} AND <= ${endDate}`);
         }
 
         // Add store condition for in-store
@@ -182,17 +220,6 @@ app.get('/api/total-revenue', async (req, res) => {
   }
 });
 
-// --- Helper function to add days to a date string (YYYY-MM-DD) ---
-function addDays(dateString, days) {
-  const date = new Date(dateString);
-  date.setUTCDate(date.getUTCDate() + days); // Use UTC functions to avoid timezone issues with date-only strings
-  // Format back to YYYY-MM-DD
-  const year = date.getUTCFullYear();
-  const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
-  const day = date.getUTCDate().toString().padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 // Get Total Orders (Combined In-Store and Online)
 app.get('/api/total-orders', async (req, res) => {
   // Extract store, startDate, endDate, and source from query parameters
@@ -229,18 +256,16 @@ app.get('/api/total-orders', async (req, res) => {
         const inStoreConditions = [];
         let inStoreParamIndex = 1;
 
-        // Add date condition for in-store, applying the +1 day workaround
+        // Add date condition for in-store, REMOVING the +1 day workaround
         if (areDatesValid) {
-            const adjustedStartDate = addDays(startDate, 1); // Add 1 day to start date
-            const adjustedEndDateExclusive = addDays(endDate, 2); // Add 2 days to end date (making it exclusive < end+1+1)
-
-            // Use >= start+1 AND < end+1+1 as per README
+            // REMOVED adjustedStartDate and adjustedEndDateExclusive
+            // Use >= startDate AND <= endDate for inclusive range
             inStoreConditions.push(`transaction_date >= $${inStoreParamIndex++}`);
-            inStoreParams.push(adjustedStartDate);
-            inStoreConditions.push(`transaction_date < $${inStoreParamIndex++}`);
-            inStoreParams.push(adjustedEndDateExclusive);
+            inStoreParams.push(startDate); // Use original startDate
+            inStoreConditions.push(`transaction_date <= $${inStoreParamIndex++}`);
+            inStoreParams.push(endDate); // Use original endDate
 
-            console.log(`Adjusted In-Store Date Range: >= ${adjustedStartDate} AND < ${adjustedEndDateExclusive}`);
+            console.log(`Using In-Store Date Range for Orders: >= ${startDate} AND <= ${endDate}`);
         }
 
         // Add store condition for in-store
@@ -371,12 +396,11 @@ app.get('/api/sales-trend', async (req, res) => {
         params.push(filterInStoreByStoreId ? inStoreId : null); // $5: store_id for in-store (or null)
         const inStoreIdParamIndex = paramIndex++;
 
-        // In-store date range workaround
-        const adjustedStartDate = addDays(startDate, 1); // Add 1 day
-        const adjustedEndDateExclusive = addDays(endDate, 2); // Add 2 days for < comparison
-        params.push(adjustedStartDate); // $6: adjusted start date for in-store
+        // In-store date range - Use original dates
+        // REMOVED adjustedStartDate and adjustedEndDateExclusive
+        params.push(startDate); // $6: start date for in-store
         const inStoreStartDateParamIndex = paramIndex++;
-        params.push(adjustedEndDateExclusive); // $7: adjusted end date for in-store
+        params.push(endDate); // $7: end date for in-store
         const inStoreEndDateParamIndex = paramIndex++;
 
         // Online query part conditions and params
@@ -408,16 +432,16 @@ app.get('/api/sales-trend', async (req, res) => {
                      )::date AS sale_date
             ),
             daily_sales AS (
-                -- In-Store Sales (adjusted date for joining)
-                SELECT 
-                    transaction_date::date - interval '1 day' AS sale_date, -- Adjust back to actual date
+                -- In-Store Sales (using original date for joining)
+                SELECT
+                    transaction_date::date AS sale_date, -- Use original date
                     SUM(total_amount) as daily_revenue
                 FROM transactions
-                WHERE 
+                WHERE
                     ($${inStoreSourceCheck1ParamIndex} = 'All' OR $${inStoreSourceCheck2ParamIndex} = 'In Store')
                     AND ($${inStoreIdParamIndex}::varchar IS NULL OR store_id = $${inStoreIdParamIndex}::varchar)
-                    AND transaction_date >= $${inStoreStartDateParamIndex}::date
-                    AND transaction_date < $${inStoreEndDateParamIndex}::date
+                    AND transaction_date >= $${inStoreStartDateParamIndex}::date -- Use original start date
+                    AND transaction_date <= $${inStoreEndDateParamIndex}::date -- Use original end date (inclusive)
                 GROUP BY transaction_date -- Group by stored date
             
                 UNION ALL
@@ -463,17 +487,17 @@ app.get('/api/sales-trend', async (req, res) => {
 
 // --- Get Top Selling Products ---
 app.get('/api/top-products', async (req, res) => {
-    const { store, startDate, endDate, source, limit = 10 } = req.query; // Default limit to 10
+    // Default limit to 40 as requested
+    const { store, startDate, endDate, source, limit = 40 } = req.query;
     const revenueSource = source || 'All';
     const productLimit = parseInt(limit, 10);
 
-    console.log(`GET /api/top-products received - Store: ${store}, Source: ${revenueSource}, Start: ${startDate}, End: ${endDate}, Limit: ${productLimit}`);
+    console.log(`GET /api/top-products revised - Store: ${store}, Source: ${revenueSource}, Start: ${startDate}, End: ${endDate}, Limit: ${productLimit}`);
 
     // --- Basic Date Validation ---
-    console.log(`Backend received raw dates - Start: ${startDate}, End: ${endDate}`); 
     const areDatesValid = startDate && endDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate);
     if (!areDatesValid) {
-        console.error(`Date validation failed for Start: ${startDate}, End: ${endDate}`); // Log validation failure
+        console.error(`Date validation failed for Start: ${startDate}, End: ${endDate}`);
         return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD for both startDate and endDate.' });
     }
     console.log(`Date parameters are valid.`);
@@ -482,48 +506,44 @@ app.get('/api/top-products', async (req, res) => {
     let client;
     try {
         client = await pool.connect();
-        console.log('DB client connected for top products');
+        console.log('DB client connected for revised top products');
 
         // Map frontend selection to database identifiers
         const onlineSiteId = store === 'Wagga' ? '641' : store === 'Preston' ? '1837' : null;
         const inStoreId = store === 'Wagga' ? 'wagga' : store === 'Preston' ? 'preston' : null;
 
-        // --- Prepare parameters - REVISED ---
+        // --- Prepare parameters ---
         const params = [];
         let paramIndex = 1;
 
-        // Add parameters ONLY used in the query, in the correct order
+        // Common parameter for source filtering
         params.push(revenueSource); // $1: sourceParamIndex
         const sourceParamIndex = paramIndex++;
-        params.push(productLimit); // $2: limitParamIndex
-        const limitParamIndex = paramIndex++;
 
         // In-store specific params
         const includeInStore = revenueSource === 'All' || revenueSource === 'In Store';
         const filterInStoreByStoreId = includeInStore && store !== 'All' && inStoreId;
-        params.push(filterInStoreByStoreId ? inStoreId : null); // $3: inStoreIdParamIndex
+        params.push(filterInStoreByStoreId ? inStoreId : null); // $2: inStoreIdParamIndex
         const inStoreIdParamIndex = paramIndex++;
-        const adjustedStartDate = addDays(startDate, 1);
-        const adjustedEndDateExclusive = addDays(endDate, 2);
-        params.push(adjustedStartDate); // $4: inStoreStartDateParamIndex
+        // REMOVED adjustedStartDate and adjustedEndDateExclusive
+        params.push(startDate); // $3: inStoreStartDateParamIndex (Use original)
         const inStoreStartDateParamIndex = paramIndex++;
-        params.push(adjustedEndDateExclusive); // $5: inStoreEndDateParamIndex
+        params.push(endDate); // $4: inStoreEndDateParamIndex (Use original)
         const inStoreEndDateParamIndex = paramIndex++;
 
         // Online specific params
         const includeOnline = revenueSource === 'All' || revenueSource === 'Bite';
         const filterOnlineBySiteId = includeOnline && store !== 'All' && onlineSiteId;
-        params.push(filterOnlineBySiteId ? onlineSiteId : null); // $6: onlineSiteIdParamIndex
+        params.push(filterOnlineBySiteId ? onlineSiteId : null); // $5: onlineSiteIdParamIndex
         const onlineSiteIdParamIndex = paramIndex++;
         const startTimestamp = `${startDate} 00:00:00`;
         const endTimestamp = `${endDate} 23:59:59`;
-        params.push(startTimestamp); // $7: onlineStartDateParamIndex
+        params.push(startTimestamp); // $6: onlineStartDateParamIndex
         const onlineStartDateParamIndex = paramIndex++;
-        params.push(endTimestamp);   // $8: onlineEndDateParamIndex
+        params.push(endTimestamp);   // $7: onlineEndDateParamIndex
         const onlineEndDateParamIndex = paramIndex++;
 
-
-        // --- Construct the SQL Query - REVISED INDICES ---
+        // --- Construct the SQL Query (Fetch combined, unsorted data) ---
         const query = `
             WITH instore_products AS (
                 SELECT
@@ -534,66 +554,99 @@ app.get('/api/top-products', async (req, res) => {
                 FROM transaction_items ti
                 JOIN transactions t ON ti.transaction_id = t.id
                 WHERE
-                    ($1 = 'All' OR $1 = 'In Store') -- $1: revenueSource
-                    AND ($3::varchar IS NULL OR t.store_id = $3::varchar) -- $3: inStoreId
-                    AND t.transaction_date >= $4::date -- $4: adjustedStartDate
-                    AND t.transaction_date < $5::date -- $5: adjustedEndDateExclusive
-                    AND ti.quantity > 0 AND ti.unit_price > 0
+                    -- Only include if source is 'All' or 'In Store'
+                    ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'In Store')
+                    AND ($${inStoreIdParamIndex}::varchar IS NULL OR t.store_id = $${inStoreIdParamIndex}::varchar)
+                    AND t.transaction_date >= $${inStoreStartDateParamIndex}::date -- Use original start date
+                    AND t.transaction_date <= $${inStoreEndDateParamIndex}::date -- Use original end date (inclusive)
+                    AND ti.quantity > 0 -- Exclude items with zero quantity
                 GROUP BY ti.product_id
             ),
             online_products AS (
                  SELECT
-                     boi.name AS product_identifier,
+                     boi.name AS product_identifier, -- Use name directly
                      'Online' AS source_type,
                      SUM(boi.quantity) AS total_quantity,
                      SUM(boi.line_price) AS total_revenue
                  FROM bite_order_items boi
                  JOIN bite_orders bo ON boi.order_id = bo.order_id
                  WHERE
-                     ($1 = 'All' OR $1 = 'Bite') -- $1: revenueSource
-                     AND ($6::varchar IS NULL OR bo.site_id = $6::varchar) -- $6: onlineSiteId
-                     AND bo.ready_at_time BETWEEN EXTRACT(EPOCH FROM $7::timestamp) AND EXTRACT(EPOCH FROM $8::timestamp) -- $7, $8: timestamps
+                     -- Only include if source is 'All' or 'Bite'
+                     ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'Bite')
+                     AND ($${onlineSiteIdParamIndex}::varchar IS NULL OR bo.site_id = $${onlineSiteIdParamIndex}::varchar)
+                     AND bo.ready_at_time BETWEEN EXTRACT(EPOCH FROM $${onlineStartDateParamIndex}::timestamp) AND EXTRACT(EPOCH FROM $${onlineEndDateParamIndex}::timestamp)
+                     AND boi.quantity > 0 -- Exclude items with zero quantity
+                     AND boi.name IS NOT NULL AND boi.name <> '' -- Exclude items without a name
                  GROUP BY boi.name
-             ),
-            combined_products AS (
-                SELECT product_identifier, source_type, total_quantity, total_revenue FROM online_products
-                UNION ALL
-                SELECT product_identifier, source_type, total_quantity, total_revenue FROM instore_products
-            ),
-            aggregated_products AS (
-                 SELECT
-                     product_identifier,
-                     SUM(total_quantity) as final_quantity,
-                     SUM(total_revenue) as final_revenue
-                 FROM combined_products
-                 GROUP BY product_identifier
              )
-            SELECT
-                ap.product_identifier,
-                ap.final_quantity,
-                ap.final_revenue::float
-            FROM aggregated_products ap
-            ORDER BY final_revenue DESC NULLS LAST
-            LIMIT $2; -- $2: productLimit
+            -- Combine results from both sources
+            SELECT product_identifier, source_type, total_quantity, total_revenue FROM instore_products
+            UNION ALL
+            SELECT product_identifier, source_type, total_quantity, total_revenue FROM online_products;
         `;
 
-        console.log('Executing Top Products Query (Simple):', query.substring(0, 500) + '...');
+        console.log('Executing Revised Top Products Query:', query.substring(0, 500) + '...');
         console.log('With params:', params);
 
         const result = await client.query(query, params);
-        console.log(`Top Products Query returned ${result.rows.length} rows.`);
+        const rawProducts = result.rows;
+        console.log(`Raw Combined Products Query returned ${rawProducts.length} rows.`);
 
-        // We will need to map product_id to names here once you provide the mapping.
-        // For now, it returns product_identifier which is name for online, id for in-store.
-        res.status(200).json(result.rows);
+        // --- Process Results in Node.js --- 
+
+        // 1. Sort by revenue descending
+        rawProducts.sort((a, b) => (b.total_revenue || 0) - (a.total_revenue || 0));
+
+        // 2. Limit to the top N
+        const topProducts = rawProducts.slice(0, productLimit);
+        console.log(`Limiting to top ${productLimit} products.`);
+
+        // 3. Enrich with details and format output
+        const finalProductList = topProducts.map(product => {
+            let name = null;
+            let salePrice = null;
+            let costPrice = null;
+
+            if (product.source_type === 'In-Store') {
+                const details = productDetailsMap[product.product_identifier]; // product_identifier is the ID string
+                if (details) {
+                    name = details.name;
+                    salePrice = details.salePrice;
+                    costPrice = details.costPrice;
+                } else {
+                    // Handle case where product ID from transaction is not in all_products.json
+                    name = `Unknown Product [${product.product_identifier}]`;
+                    console.warn(`Product ID ${product.product_identifier} not found in productDetailsMap.`);
+                }
+            } else if (product.source_type === 'Online') {
+                // For online, the identifier is already the name
+                name = product.product_identifier;
+                // SalePrice and CostPrice are not applicable/available for online per requirements
+                salePrice = null;
+                costPrice = null;
+            }
+
+            // Return the formatted object
+            return {
+                name: name,
+                source: product.source_type,
+                revenue: parseFloat(product.total_revenue || 0), // Ensure float
+                salePrice: salePrice, // Will be null for Online or if not found
+                costPrice: costPrice, // Will be null for Online or if not found
+                quantity: parseInt(product.total_quantity || 0, 10) // Ensure integer
+            };
+        });
+
+        console.log(`Sending ${finalProductList.length} processed top products.`);
+        res.status(200).json(finalProductList);
 
     } catch (err) {
-        console.error('Error fetching top products:', err.stack);
+        console.error('Error fetching revised top products:', err.stack);
         res.status(500).json({ error: 'Internal Server Error', details: err.message });
     } finally {
         if (client) {
             client.release();
-            console.log('DB client released after top products query');
+            console.log('DB client released after revised top products query');
         }
     }
 });
@@ -635,11 +688,10 @@ app.get('/api/sales-activity', async (req, res) => {
         const filterInStoreByStoreId = includeInStore && store !== 'All' && inStoreId;
         params.push(filterInStoreByStoreId ? inStoreId : null); // $2: inStoreIdParamIndex
         const inStoreIdParamIndex = paramIndex++;
-        const adjustedStartDate = addDays(startDate, 1);
-        const adjustedEndDateExclusive = addDays(endDate, 2);
-        params.push(adjustedStartDate); // $3: inStoreStartDateParamIndex
+        // REMOVED adjustedStartDate and adjustedEndDateExclusive
+        params.push(startDate); // $3: inStoreStartDateParamIndex (Use original)
         const inStoreStartDateParamIndex = paramIndex++;
-        params.push(adjustedEndDateExclusive); // $4: inStoreEndDateParamIndex
+        params.push(endDate); // $4: inStoreEndDateParamIndex (Use original)
         const inStoreEndDateParamIndex = paramIndex++;
 
         // Online specific params
@@ -666,8 +718,8 @@ app.get('/api/sales-activity', async (req, res) => {
                 WHERE
                     ($${sourceParamIndex} = 'All' OR $${sourceParamIndex} = 'In Store')
                     AND ($${inStoreIdParamIndex}::varchar IS NULL OR t.store_id = $${inStoreIdParamIndex}::varchar)
-                    AND t.transaction_date >= $${inStoreStartDateParamIndex}::date
-                    AND t.transaction_date < $${inStoreEndDateParamIndex}::date
+                    AND t.transaction_date >= $${inStoreStartDateParamIndex}::date -- Use original start date
+                    AND t.transaction_date <= $${inStoreEndDateParamIndex}::date -- Use original end date (inclusive)
 
                 UNION ALL
 
@@ -714,97 +766,15 @@ app.get('/api/sales-activity', async (req, res) => {
     }
 });
 
-// --- API Endpoint: Get Product Map ---
-app.get('/api/products', async (req, res) => {
-    const now = Date.now();
-    console.log('GET /api/products requested.');
-
-    // Check cache validity
-    if (now - lastProductFetchTime < CACHE_DURATION_MS && Object.keys(productMapCache).length > 0) {
-        console.log('Returning cached product map.');
-        return res.json(productMapCache);
-    }
-
-    console.log('Cache stale or empty. Fetching products from Epos Now API...');
-    // Use the Preston API key first. Adjust if needed.
-    const apiKey = process.env.PRESTON_API_KEY;
-    if (!apiKey) {
-         console.error('Epos Now API Key (PRESTON_API_KEY) not found in .env');
-         // Avoid sending detailed error to client, log it server-side
-         return res.status(500).json({ error: 'Server configuration error.' });
-    }
-
-    const apiUrl = 'https://api.eposnowhq.com/api/v4/Product';
-    const options = {
-        method: 'GET',
-        headers: {
-            // Assuming the key is already Base64 encoded or needs to be used as a Bearer token.
-            // Using Basic Auth format based on the typical structure of such keys.
-            // Adjust if Epos Now uses a different scheme (e.g., Bearer Token).
-            'Authorization': `Basic ${apiKey}`,
-            'Content-Type': 'application/json'
-        }
-    };
-
-    try {
-        const response = await fetch(apiUrl, options);
-        console.log(`Epos Now API Response Status: ${response.status} ${response.statusText}`);
-
-        if (!response.ok) {
-            let errorBody = 'Could not read error body';
-            try {
-                 // Try reading the body for more detailed error info from Epos
-                 errorBody = await response.text();
-                 console.error(`Epos Now API Error Body: ${errorBody}`);
-            } catch (e) { console.error('Failed to read Epos Now error body', e); }
-            // Throw an error to be caught by the catch block
-            throw new Error(`Failed to fetch products from Epos Now API. Status: ${response.status}`);
-        }
-
-        const products = await response.json(); // Expecting an array of product objects
-        console.log(`Fetched ${Array.isArray(products) ? products.length : 'invalid data'} products from Epos Now.`);
-
-        // --- DEBUG LOG: Log the first product object --- 
-        if (Array.isArray(products) && products.length > 0) {
-            console.log('First raw product object from Epos:', JSON.stringify(products[0], null, 2));
-        }
-        // --- END DEBUG LOG ---
-
-        // Transform into ID-to-Name map
-        const newProductMap = {};
-        if (Array.isArray(products)) {
-            products.forEach(product => {
-                // Use product.Id (uppercase I) and product.Name (uppercase N)
-                 if (product && typeof product.Id !== 'undefined' && typeof product.Name === 'string') {
-                     newProductMap[product.Id.toString()] = product.Name;
-                 } else {
-                      // Log if the structure is unexpected
-                      console.warn('Skipping product due to missing/invalid id or Name:', product);
-                 }
-            });
-        } else {
-             console.error('Epos Now API response was not an array:', products);
-             throw new Error('Unexpected response format from Epos Now API.');
-        }
-
-        // Update cache
-        productMapCache = newProductMap;
-        lastProductFetchTime = now;
-        console.log(`Product map cache updated with ${Object.keys(productMapCache).length} entries.`);
-
-        res.json(productMapCache);
-
-    } catch (error) {
-        console.error('Error in /api/products endpoint:', error);
-        res.status(500).json({ error: 'Failed to retrieve product data', details: error.message });
-    }
-});
-
 // --- Server Start ---
-app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-  console.log(`Accepting requests from: ${FRONTEND_URL}`);
-});
+// Use an async IIFE to ensure product details are loaded before starting
+(async () => {
+    await loadProductDetails(); // Load product details first
+    app.listen(PORT, () => {
+        console.log(`Backend server running on http://localhost:${PORT}`);
+        console.log(`Accepting requests from: ${FRONTEND_URL}`);
+    });
+})(); // <-- Invoke the async function immediately
 
 // --- Graceful Shutdown ---
 process.on('SIGINT', async () => {
