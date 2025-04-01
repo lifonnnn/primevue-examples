@@ -73,7 +73,6 @@ const handleRevenueSourceChange = (newSource) => {
                 :selectedStore="selectedStore"
                 :dateRange="dateRange"
                 :selectedRevenueSource="selectedRevenueSource"
-                :limit="10"
                 class="mb-4"
             />
             <PeakTimeWidget
